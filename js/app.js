@@ -1007,11 +1007,58 @@ async function saveDocx() {
     toast('Word document downloaded.');
   } catch (err) { console.error(err); toast('Sorry, the Word export failed.'); }
 }
-async function saveHtml() {
+async function buildHtml() {
   const css = await fetch('css/doc.css').then((r) => r.text()).catch(() => '');
   const d = pageDims();
   const html = `<!doctype html>\n<html lang="${editor.lang}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="generator" content="Inkwell"><title>${esc(doc.title)}</title><style>${css}\nbody{margin:0;background:#f1f1ee}.doc{box-sizing:border-box;max-width:${d.w}mm;margin:24px auto;padding:${d.m.t}mm ${d.m.r}mm ${d.m.b}mm ${d.m.l}mm;background:#fff;white-space:pre-wrap;overflow-wrap:break-word}.doc .page-break::after{display:none}@media print{body{background:none}.doc{margin:0;padding:0;max-width:none}}</style></head><body><div class="doc"${doc.theme !== 'modern' ? ` data-theme="${doc.theme}"` : ''}>${editor.innerHTML}</div></body></html>`;
-  download(new Blob([html], { type: 'text/html' }), fileBase() + '.html');
+  return new Blob([html], { type: 'text/html' });
+}
+async function saveHtml() { download(await buildHtml(), fileBase() + '.html'); }
+
+// ---------- save to this device ----------
+// Where the browser allows it (Chrome, Edge), Save writes straight to a file the
+// user picked and later saves overwrite that file. Elsewhere it downloads a copy.
+const FILE_TYPES = [
+  { description: 'Word document', accept: { 'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'] } },
+  { description: 'Inkwell web page (keeps all formatting)', accept: { 'text/html': ['.html'] } },
+  { description: 'Plain text', accept: { 'text/plain': ['.txt'] } },
+];
+let fileHandle = null, fileDocId = null;
+async function blobFor(name) {
+  if (/\.html?$/i.test(name)) return buildHtml();
+  if (/\.(txt|md)$/i.test(name)) return new Blob([editor.innerText], { type: 'text/plain' });
+  return exportDocx(editor, { title: doc.title, page: pageDims() });
+}
+async function saveToDevice(saveAs) {
+  $('#backstage').hidden = true;
+  await flush();
+  if (!window.showSaveFilePicker) {
+    try {
+      download(await blobFor('x.docx'), fileBase() + '.docx');
+      toast('Saved to your Downloads folder as a Word document.');
+    } catch (err) { console.error(err); toast('Sorry, the document could not be saved.'); }
+    return;
+  }
+  let handle = fileDocId === doc.id ? fileHandle : null;
+  if (!handle || saveAs) {
+    try {
+      handle = await window.showSaveFilePicker({ suggestedName: fileBase() + '.docx', types: FILE_TYPES });
+    } catch (err) {
+      if (err && err.name === 'AbortError') return;   // picker cancelled
+      console.error(err); toast('Sorry, the document could not be saved.'); return;
+    }
+  }
+  try {
+    const blob = await blobFor(handle.name);
+    const w = await handle.createWritable();
+    await w.write(blob); await w.close();
+    fileHandle = handle; fileDocId = doc.id;
+    toast(`Saved to ${handle.name}`);
+  } catch (err) {
+    console.error(err);
+    if (fileHandle === handle) { fileHandle = null; fileDocId = null; }
+    toast('Sorry, that file could not be written. Try Save as.');
+  }
 }
 
 // ---------- commands ----------
@@ -1076,6 +1123,8 @@ function run(cmd, val, el) {
     case 'backstage': toggleBackstage(); break;
     case 'new': createDoc('Untitled document', ''); break;
     case 'open': $('#file-open').click(); break;
+    case 'save': saveToDevice(false); break;
+    case 'saveAs': saveToDevice(true); break;
     case 'saveDocx': saveDocx(); break;
     case 'saveHtml': saveHtml(); break;
     case 'saveTxt': download(new Blob([editor.innerText], { type: 'text/plain' }), fileBase() + '.txt'); break;
@@ -1268,7 +1317,7 @@ document.addEventListener('keydown', (e) => {
   }
   if (!mod) return;
   if (k === 'f' && !e.shiftKey && !e.altKey) { e.preventDefault(); showSide('find'); return; }
-  if (k === 's') { e.preventDefault(); flush().then(() => toast('Saved. Inkwell also saves automatically; use File to download a copy.')); return; }
+  if (k === 's') { e.preventDefault(); saveToDevice(e.shiftKey); return; }
   if (typing || $('dialog[open]') || !$('#backstage').hidden) return;
   if (k === 'z') { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
   if (k === 'y' && !isMac) { e.preventDefault(); redo(); return; }

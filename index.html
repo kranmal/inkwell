@@ -18,6 +18,7 @@
   <input id="title" class="doc-name" aria-label="Document name" spellcheck="false" autocomplete="off">
   <span id="save-state" class="save-state" aria-live="polite">Saved</span>
   <span class="spacer"></span>
+  <button class="rb" data-cmd="save" data-icon="save" title="Save to this device (⌘S)" aria-label="Save to this device"></button>
   <button class="rb" data-cmd="print" data-icon="printer" title="Print or save as PDF (⌘P)" aria-label="Print"></button>
   <button class="rb" data-cmd="dark" data-icon="moon" id="dark-btn" title="Switch light / dark" aria-label="Toggle dark mode"></button>
 </header>
@@ -319,6 +320,8 @@
     <button class="bs-back" data-cmd="backstage" data-icon="arrowLeft">Back to document</button>
     <button class="bs-item" data-cmd="new" data-icon="filePlus">New blank document</button>
     <button class="bs-item" data-cmd="open" data-icon="folder">Open a file…<small>.docx, .html, .txt</small></button>
+    <button class="bs-item" data-cmd="save" data-icon="save">Save to this device<small>⌘S</small></button>
+    <button class="bs-item" data-cmd="saveAs" data-icon="save">Save as…<small>⇧⌘S</small></button>
     <div class="bs-label">Download a copy</div>
     <button class="bs-item" data-cmd="saveDocx" data-icon="download">Word document<small>.docx</small></button>
     <button class="bs-item" data-cmd="saveHtml" data-icon="download">Web page<small>.html</small></button>
