@@ -1,0 +1,49 @@
+/* Document typography. Scoped to .doc so it can be embedded in HTML exports. */
+.doc {
+  --doc-font: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --head-font: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --head-color: #0f5f59;
+  --doc-accent: #0f766e;
+  font-family: var(--doc-font);
+  font-size: 11pt;
+  line-height: 1.5;
+  color: #1c1c1c;
+  white-space: pre-wrap;
+  tab-size: 4;
+  overflow-wrap: break-word;
+}
+.doc[data-theme="classic"] { --doc-font: "Times New Roman", Times, serif; --head-font: "Times New Roman", Times, serif; --head-color: #111111; --doc-accent: #1f3a5f; font-size: 12pt; }
+.doc[data-theme="elegant"] { --doc-font: Baskerville, "Palatino Linotype", Palatino, Georgia, serif; --head-font: Didot, "Bodoni 72", Baskerville, Georgia, serif; --head-color: #7a1f2b; --doc-accent: #7a1f2b; font-size: 12pt; }
+.doc[data-theme="editorial"] { --doc-font: Georgia, "Times New Roman", serif; --head-font: "Avenir Next", Avenir, "Helvetica Neue", Arial, sans-serif; --head-color: #1b2a49; --doc-accent: #b4532a; }
+.doc[data-theme="draft"] { --doc-font: Menlo, "Courier New", monospace; --head-font: Menlo, "Courier New", monospace; --head-color: #222222; --doc-accent: #444444; font-size: 10.5pt; }
+
+.doc p { margin: 0 0 8pt; }
+.doc h1, .doc h2, .doc h3, .doc h4, .doc h5, .doc h6 { font-family: var(--head-font); color: var(--head-color); line-height: 1.2; margin: 18pt 0 6pt; font-weight: 600; }
+.doc h1 { font-size: 20pt; letter-spacing: -0.01em; }
+.doc h2 { font-size: 15pt; }
+.doc h3 { font-size: 12.5pt; }
+.doc h4, .doc h5, .doc h6 { font-size: 11pt; }
+.doc > :first-child { margin-top: 0; }
+.doc .doc-title { font-family: var(--head-font); font-size: 30pt; line-height: 1.1; font-weight: 700; letter-spacing: -0.02em; color: #141414; margin: 0 0 4pt; }
+.doc .doc-subtitle { font-family: var(--head-font); font-size: 14pt; color: #6b6b6b; margin: 0 0 18pt; }
+.doc .no-spacing { margin: 0; line-height: 1.15; }
+.doc .quote { margin: 10pt 0 10pt 18pt; padding-left: 12pt; border-left: 2pt solid var(--doc-accent); font-style: italic; color: #444444; }
+.doc blockquote { margin: 10pt 0 10pt 18pt; padding-left: 12pt; border-left: 2pt solid var(--doc-accent); color: #444444; }
+.doc pre { font-family: Menlo, Consolas, "Courier New", monospace; font-size: 9.5pt; line-height: 1.45; background: #f4f4f2; border-radius: 4pt; padding: 8pt 10pt; margin: 0 0 8pt; white-space: pre-wrap; }
+.doc a { color: var(--doc-accent); text-decoration: underline; text-underline-offset: 2px; }
+.doc ul, .doc ol { margin: 0 0 8pt; padding-left: 26pt; }
+.doc li { margin: 0 0 3pt; }
+.doc li > ul, .doc li > ol, .doc ul > ul, .doc ol > ol, .doc ul > ol, .doc ol > ul { margin-bottom: 0; }
+.doc table { border-collapse: collapse; width: 100%; margin: 6pt 0 10pt; table-layout: fixed; }
+.doc td, .doc th { border: 1px solid #bfbfbf; padding: 4pt 6pt; vertical-align: top; text-align: left; min-width: 24px; }
+.doc th { background: #eef3f2; font-weight: 600; }
+.doc img { max-width: 100%; height: auto; vertical-align: bottom; }
+.doc hr { border: 0; border-top: 1px solid #b5b5b5; margin: 12pt 0; }
+.doc .page-break { break-after: page; height: 0; margin: 14pt 0; border-top: 1px dashed #9a9a9a; position: relative; user-select: none; }
+.doc .page-break::after { content: "Page break"; position: absolute; top: -8px; left: 50%; transform: translateX(-50%); background: #fff; padding: 0 8px; font: 500 10px/16px system-ui, sans-serif; color: #8a8a8a; white-space: nowrap; }
+@media print {
+  .doc .page-break { border: 0; margin: 0; }
+  .doc .page-break::after { content: none; }
+  .doc h1, .doc h2, .doc h3 { break-after: avoid; }
+  .doc tr, .doc img { break-inside: avoid; }
+}

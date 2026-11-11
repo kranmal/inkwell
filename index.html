@@ -1,0 +1,364 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Inkwell</title>
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230f766e'/%3E%3Cpath d='M10 9h12M10 14h12M10 19h7' stroke='white' stroke-width='2.4' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="css/doc.css">
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+
+<header class="titlebar">
+  <div class="brand" aria-hidden="true">
+    <svg viewBox="0 0 32 32" width="22" height="22"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M10 9h12M10 14h12M10 19h7" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/></svg>
+  </div>
+  <input id="title" class="doc-name" aria-label="Document name" spellcheck="false" autocomplete="off">
+  <span id="save-state" class="save-state" aria-live="polite">Saved</span>
+  <span class="spacer"></span>
+  <button class="rb" data-cmd="print" data-icon="printer" title="Print or save as PDF (⌘P)" aria-label="Print"></button>
+  <button class="rb" data-cmd="dark" data-icon="moon" id="dark-btn" title="Switch light / dark" aria-label="Toggle dark mode"></button>
+</header>
+
+<nav class="tabs" role="tablist" aria-label="Ribbon">
+  <button class="tab file" data-cmd="backstage">File</button>
+  <button class="tab on" data-tab="home" role="tab">Home</button>
+  <button class="tab" data-tab="insert" role="tab">Insert</button>
+  <button class="tab" data-tab="design" role="tab">Design</button>
+  <button class="tab" data-tab="layout" role="tab">Layout</button>
+  <button class="tab" data-tab="review" role="tab">Review</button>
+  <button class="tab" data-tab="view" role="tab">View</button>
+  <button class="tab ctx" data-tab="table" role="tab" hidden>Table</button>
+</nav>
+
+<div class="ribbon" id="ribbon">
+  <!-- HOME -->
+  <div class="panel on" data-panel="home">
+    <div class="grp">
+      <button class="rb" data-cmd="undo" data-icon="undo" title="Undo (⌘Z)" aria-label="Undo"></button>
+      <button class="rb" data-cmd="redo" data-icon="redo" title="Redo (⇧⌘Z)" aria-label="Redo"></button>
+      <button class="rb" data-cmd="painter" data-icon="brush" title="Format painter: copy formatting, then select text to apply" aria-label="Format painter"></button>
+    </div>
+    <div class="grp">
+      <button class="rb drop style-btn" data-menu="m-style" title="Paragraph style"><span id="style-label">Normal</span></button>
+    </div>
+    <div class="grp">
+      <select id="font-name" class="sel font" data-cmd="fontName" title="Font" aria-label="Font"></select>
+      <select id="font-size" class="sel size" data-cmd="fontSize" title="Font size" aria-label="Font size"></select>
+      <button class="rb" data-cmd="grow" title="Increase font size" aria-label="Increase font size"><span class="glyph">A<sup>+</sup></span></button>
+      <button class="rb" data-cmd="shrink" title="Decrease font size" aria-label="Decrease font size"><span class="glyph sm">A<sup>−</sup></span></button>
+    </div>
+    <div class="grp">
+      <button class="rb" data-cmd="bold" title="Bold (⌘B)" aria-label="Bold"><span class="glyph"><b>B</b></span></button>
+      <button class="rb" data-cmd="italic" title="Italic (⌘I)" aria-label="Italic"><span class="glyph serif"><i>I</i></span></button>
+      <button class="rb" data-cmd="underline" title="Underline (⌘U)" aria-label="Underline"><span class="glyph"><u>U</u></span></button>
+      <button class="rb" data-cmd="strike" title="Strikethrough" aria-label="Strikethrough"><span class="glyph"><s>S</s></span></button>
+      <button class="rb" data-cmd="sub" title="Subscript" aria-label="Subscript"><span class="glyph">x<sub>2</sub></span></button>
+      <button class="rb" data-cmd="sup" title="Superscript" aria-label="Superscript"><span class="glyph">x<sup>2</sup></span></button>
+      <button class="rb drop" data-menu="m-case" title="Change case" aria-label="Change case"><span class="glyph">Aa</span></button>
+    </div>
+    <div class="grp">
+      <button class="rb drop" data-menu="m-color" title="Text colour" aria-label="Text colour"><span class="glyph swatch-a">A<i id="color-bar" style="background:#e5484d"></i></span></button>
+      <button class="rb drop" data-menu="m-hilite" title="Highlight" aria-label="Highlight"><span class="glyph swatch-a"><span data-icon="marker"></span><i id="hilite-bar" style="background:#fff59d"></i></span></button>
+      <button class="rb" data-cmd="clear" data-icon="eraser" title="Clear formatting" aria-label="Clear formatting"></button>
+    </div>
+    <div class="grp">
+      <button class="rb" data-cmd="ul" data-icon="list" title="Bullet list" aria-label="Bullet list"></button>
+      <button class="rb" data-cmd="ol" data-icon="listOrdered" title="Numbered list" aria-label="Numbered list"></button>
+      <button class="rb" data-cmd="outdent" data-icon="outdent" title="Decrease indent" aria-label="Decrease indent"></button>
+      <button class="rb" data-cmd="indent" data-icon="indent" title="Increase indent" aria-label="Increase indent"></button>
+    </div>
+    <div class="grp">
+      <button class="rb" data-cmd="align" data-val="Left" data-icon="alignLeft" title="Align left" aria-label="Align left"></button>
+      <button class="rb" data-cmd="align" data-val="Center" data-icon="alignCenter" title="Centre" aria-label="Centre"></button>
+      <button class="rb" data-cmd="align" data-val="Right" data-icon="alignRight" title="Align right" aria-label="Align right"></button>
+      <button class="rb" data-cmd="align" data-val="Full" data-icon="alignJustify" title="Justify" aria-label="Justify"></button>
+      <button class="rb drop" data-menu="m-spacing" data-icon="lineSpacing" title="Line and paragraph spacing" aria-label="Line and paragraph spacing"></button>
+    </div>
+    <div class="grp">
+      <button class="rb wide" data-cmd="find" data-icon="search" title="Find and replace (⌘F)">Find</button>
+    </div>
+  </div>
+
+  <!-- INSERT -->
+  <div class="panel" data-panel="insert">
+    <div class="grp">
+      <button class="rb wide drop" data-menu="m-table" data-icon="table">Table</button>
+      <button class="rb wide" data-cmd="image" data-icon="image">Picture</button>
+      <button class="rb wide" data-cmd="link" data-icon="link" title="Insert link (⌘K)">Link</button>
+    </div>
+    <div class="grp">
+      <button class="rb wide" data-cmd="pageBreak" data-icon="pageBreak" title="Page break (⌘↵)">Page break</button>
+      <button class="rb wide" data-cmd="hr" data-icon="minus">Divider</button>
+    </div>
+    <div class="grp">
+      <button class="rb wide" data-cmd="date" data-icon="calendar">Date</button>
+      <button class="rb wide drop" data-menu="m-symbol" data-icon="omega">Symbol</button>
+    </div>
+  </div>
+
+  <!-- DESIGN -->
+  <div class="panel" data-panel="design">
+    <div class="grp themes" id="themes"></div>
+    <div class="grp"><span class="hint">Themes restyle the whole document: fonts, headings and accent colour.</span></div>
+  </div>
+
+  <!-- LAYOUT -->
+  <div class="panel" data-panel="layout">
+    <div class="grp">
+      <button class="rb wide drop" data-menu="m-margins" data-icon="margins">Margins</button>
+      <button class="rb wide drop" data-menu="m-orient" data-icon="fileText">Orientation</button>
+      <button class="rb wide drop" data-menu="m-size" data-icon="file">Size</button>
+      <button class="rb wide drop" data-menu="m-cols" data-icon="columns">Columns</button>
+    </div>
+    <div class="grp">
+      <button class="rb wide drop" data-menu="m-spacing" data-icon="lineSpacing">Spacing</button>
+      <button class="rb wide" data-cmd="outdent" data-icon="outdent">Indent less</button>
+      <button class="rb wide" data-cmd="indent" data-icon="indent">Indent more</button>
+    </div>
+  </div>
+
+  <!-- REVIEW -->
+  <div class="panel" data-panel="review">
+    <div class="grp">
+      <button class="rb wide" data-cmd="proofPane" data-icon="spell">Spelling &amp; grammar</button>
+      <label class="switch" title="Underline spelling and grammar issues as you type"><input type="checkbox" id="proof-on" checked><span></span>Check as you type</label>
+      <button class="rb wide drop" data-menu="m-lang" data-icon="globe"><span id="lang-label">English (UK)</span></button>
+    </div>
+    <div class="grp">
+      <button class="rb wide" data-cmd="wordCount" data-icon="hash">Word count</button>
+      <button class="rb wide" data-cmd="readAloud" data-icon="volume" id="read-btn">Read aloud</button>
+    </div>
+  </div>
+
+  <!-- VIEW -->
+  <div class="panel" data-panel="view">
+    <div class="grp">
+      <button class="rb wide" data-cmd="navPane" data-icon="panelLeft">Navigation</button>
+      <button class="rb wide" data-cmd="focus" data-icon="maximize" title="Hide everything but the page (Esc to exit)">Focus</button>
+      <button class="rb wide" data-cmd="dark" data-icon="moon">Dark mode</button>
+    </div>
+    <div class="grp">
+      <button class="rb" data-cmd="zoomOut" data-icon="minus" title="Zoom out" aria-label="Zoom out"></button>
+      <button class="rb wide" data-cmd="zoom" data-val="100" title="Reset zoom"><span class="zoom-label">100%</span></button>
+      <button class="rb" data-cmd="zoomIn" data-icon="plus" title="Zoom in" aria-label="Zoom in"></button>
+      <button class="rb wide" data-cmd="zoomFit">Fit width</button>
+    </div>
+  </div>
+
+  <!-- TABLE (contextual) -->
+  <div class="panel" data-panel="table">
+    <div class="grp">
+      <button class="rb wide" data-cmd="rowAbove" data-icon="plus">Row above</button>
+      <button class="rb wide" data-cmd="rowBelow" data-icon="plus">Row below</button>
+      <button class="rb wide" data-cmd="colLeft" data-icon="plus">Column left</button>
+      <button class="rb wide" data-cmd="colRight" data-icon="plus">Column right</button>
+    </div>
+    <div class="grp">
+      <button class="rb wide" data-cmd="headerRow" data-icon="table">Header row</button>
+    </div>
+    <div class="grp">
+      <button class="rb wide" data-cmd="delRow" data-icon="trash">Delete row</button>
+      <button class="rb wide" data-cmd="delCol" data-icon="trash">Delete column</button>
+      <button class="rb wide danger" data-cmd="delTable" data-icon="trash">Delete table</button>
+    </div>
+  </div>
+</div>
+
+<main class="workspace">
+  <aside class="pane left" id="nav-pane" hidden aria-label="Navigation">
+    <div class="pane-head"><h2>Navigation</h2><button class="rb" data-cmd="navPane" data-icon="x" aria-label="Close navigation"></button></div>
+    <div id="outline" class="outline"></div>
+  </aside>
+
+  <div class="canvas" id="canvas">
+    <div class="page" id="page">
+      <div id="editor" class="doc" contenteditable="true" spellcheck="false" role="textbox" aria-multiline="true" aria-label="Document"></div>
+    </div>
+    <div id="img-box" class="img-box" hidden>
+      <div class="img-bar">
+        <button class="rb" data-cmd="imgAlign" data-val="inline" title="In line with text" data-icon="alignJustify"></button>
+        <button class="rb" data-cmd="imgAlign" data-val="left" title="Wrap, left" data-icon="alignLeft"></button>
+        <button class="rb" data-cmd="imgAlign" data-val="center" title="Centre" data-icon="alignCenter"></button>
+        <button class="rb" data-cmd="imgAlign" data-val="right" title="Wrap, right" data-icon="alignRight"></button>
+        <button class="rb" data-cmd="imgDelete" title="Delete picture" data-icon="trash"></button>
+      </div>
+      <span class="img-handle" id="img-handle" title="Drag to resize"></span>
+    </div>
+  </div>
+
+  <aside class="pane right" id="side-pane" hidden aria-label="Side panel">
+    <!-- Proofing -->
+    <section id="proof-pane" hidden>
+      <div class="pane-head"><h2>Editor</h2><button class="rb" data-cmd="closeSide" data-icon="x" aria-label="Close"></button></div>
+      <div class="score">
+        <svg viewBox="0 0 44 44" width="56" height="56" class="ring"><circle cx="22" cy="22" r="19" class="ring-bg"/><circle cx="22" cy="22" r="19" class="ring-fg" id="ring-fg"/></svg>
+        <div><div class="score-num" id="score-num">–</div><div class="score-sub" id="score-sub">Checking…</div></div>
+      </div>
+      <div class="counts" id="proof-counts"></div>
+      <div class="issues" id="issues"></div>
+    </section>
+    <!-- Find -->
+    <section id="find-pane" hidden>
+      <div class="pane-head"><h2>Find and replace</h2><button class="rb" data-cmd="closeSide" data-icon="x" aria-label="Close"></button></div>
+      <div class="find-form">
+        <label class="field"><span>Find</span><input id="find-q" type="text" autocomplete="off" spellcheck="false"></label>
+        <label class="field"><span>Replace with</span><input id="find-r" type="text" autocomplete="off" spellcheck="false"></label>
+        <div class="row">
+          <label class="check"><input type="checkbox" id="find-case">Match case</label>
+          <label class="check"><input type="checkbox" id="find-word">Whole words</label>
+        </div>
+        <div class="row">
+          <button class="btn" data-cmd="findPrev">Previous</button>
+          <button class="btn" data-cmd="findNext">Next</button>
+          <span class="find-count" id="find-count"></span>
+        </div>
+        <div class="row">
+          <button class="btn" data-cmd="replaceOne">Replace</button>
+          <button class="btn primary" data-cmd="replaceAll">Replace all</button>
+        </div>
+      </div>
+    </section>
+  </aside>
+</main>
+
+<footer class="statusbar">
+  <span id="st-page">Page 1 of 1</span>
+  <button class="st-btn" data-cmd="wordCount" id="st-words">0 words</button>
+  <span id="st-lang" class="st-dim"></span>
+  <button class="st-btn proof-chip" data-cmd="proofPane" id="st-proof"><i class="dot"></i><span>Checking…</span></button>
+  <span class="spacer"></span>
+  <button class="st-btn" data-cmd="zoomOut" aria-label="Zoom out">−</button>
+  <input type="range" id="zoom-range" min="50" max="200" step="10" value="100" aria-label="Zoom">
+  <button class="st-btn" data-cmd="zoomIn" aria-label="Zoom in">+</button>
+  <span class="zoom-label st-zoom">100%</span>
+</footer>
+
+<button id="focus-exit" class="btn" data-cmd="focus" hidden>Exit focus</button>
+
+<!-- ============ menus ============ -->
+<div class="menu styles" id="m-style" hidden>
+  <button data-cmd="style" data-val="normal"><span class="pv">Normal</span></button>
+  <button data-cmd="style" data-val="nospace"><span class="pv">No spacing</span></button>
+  <button data-cmd="style" data-val="title"><span class="pv pv-title">Title</span></button>
+  <button data-cmd="style" data-val="subtitle"><span class="pv pv-sub">Subtitle</span></button>
+  <button data-cmd="style" data-val="h1"><span class="pv pv-h1">Heading 1</span><kbd>⌥⌘1</kbd></button>
+  <button data-cmd="style" data-val="h2"><span class="pv pv-h2">Heading 2</span><kbd>⌥⌘2</kbd></button>
+  <button data-cmd="style" data-val="h3"><span class="pv pv-h3">Heading 3</span><kbd>⌥⌘3</kbd></button>
+  <button data-cmd="style" data-val="quote"><span class="pv pv-quote">Quote</span></button>
+  <button data-cmd="style" data-val="code"><span class="pv pv-code">Code block</span></button>
+</div>
+
+<div class="menu" id="m-case" hidden>
+  <button data-cmd="case" data-val="sentence">Sentence case.</button>
+  <button data-cmd="case" data-val="lower">lowercase</button>
+  <button data-cmd="case" data-val="upper">UPPERCASE</button>
+  <button data-cmd="case" data-val="title">Capitalize Each Word</button>
+  <button data-cmd="case" data-val="toggle">tOGGLE cASE</button>
+</div>
+
+<div class="menu pal" id="m-color" hidden><div class="swatches" data-pal="color"></div>
+  <label class="custom">Custom<input type="color" data-cmd="color" value="#0f766e"></label></div>
+<div class="menu pal" id="m-hilite" hidden><div class="swatches" data-pal="hilite"></div>
+  <button data-cmd="hilite" data-val="transparent">No highlight</button></div>
+
+<div class="menu" id="m-spacing" hidden>
+  <div class="menu-label">Line spacing</div>
+  <button data-cmd="lineHeight" data-val="1">Single</button>
+  <button data-cmd="lineHeight" data-val="1.15">1.15</button>
+  <button data-cmd="lineHeight" data-val="1.5">1.5</button>
+  <button data-cmd="lineHeight" data-val="2">Double</button>
+  <hr>
+  <div class="menu-label">Paragraph</div>
+  <button data-cmd="space" data-val="before:12">Add space before</button>
+  <button data-cmd="space" data-val="before:0">Remove space before</button>
+  <button data-cmd="space" data-val="after:12">Add space after</button>
+  <button data-cmd="space" data-val="after:0">Remove space after</button>
+</div>
+
+<div class="menu" id="m-table" hidden>
+  <div class="tgrid" id="tgrid"></div>
+  <div class="tgrid-label" id="tgrid-label">Insert table</div>
+</div>
+
+<div class="menu" id="m-symbol" hidden><div class="symbols" id="symbols"></div></div>
+
+<div class="menu" id="m-margins" hidden>
+  <button data-cmd="margins" data-val="normal">Normal <small>2.54 cm all round</small></button>
+  <button data-cmd="margins" data-val="narrow">Narrow <small>1.27 cm all round</small></button>
+  <button data-cmd="margins" data-val="moderate">Moderate <small>1.91 cm sides</small></button>
+  <button data-cmd="margins" data-val="wide">Wide <small>5.08 cm sides</small></button>
+</div>
+<div class="menu" id="m-orient" hidden>
+  <button data-cmd="orient" data-val="portrait">Portrait</button>
+  <button data-cmd="orient" data-val="landscape">Landscape</button>
+</div>
+<div class="menu" id="m-size" hidden>
+  <button data-cmd="pageSize" data-val="A4">A4 <small>21 × 29.7 cm</small></button>
+  <button data-cmd="pageSize" data-val="Letter">Letter <small>8.5 × 11 in</small></button>
+  <button data-cmd="pageSize" data-val="Legal">Legal <small>8.5 × 14 in</small></button>
+  <button data-cmd="pageSize" data-val="A5">A5 <small>14.8 × 21 cm</small></button>
+</div>
+<div class="menu" id="m-cols" hidden>
+  <button data-cmd="cols" data-val="1">One</button>
+  <button data-cmd="cols" data-val="2">Two</button>
+  <button data-cmd="cols" data-val="3">Three</button>
+</div>
+<div class="menu" id="m-lang" hidden>
+  <button data-cmd="lang" data-val="en_GB">English (UK)</button>
+  <button data-cmd="lang" data-val="en_US">English (US)</button>
+</div>
+
+<div class="menu ctx-menu" id="ctx" hidden></div>
+
+<!-- ============ backstage ============ -->
+<div class="backstage" id="backstage" hidden>
+  <div class="bs-side">
+    <button class="bs-back" data-cmd="backstage" data-icon="arrowLeft">Back to document</button>
+    <button class="bs-item" data-cmd="new" data-icon="filePlus">New blank document</button>
+    <button class="bs-item" data-cmd="open" data-icon="folder">Open a file…<small>.docx, .html, .txt</small></button>
+    <div class="bs-label">Download a copy</div>
+    <button class="bs-item" data-cmd="saveDocx" data-icon="download">Word document<small>.docx</small></button>
+    <button class="bs-item" data-cmd="saveHtml" data-icon="download">Web page<small>.html</small></button>
+    <button class="bs-item" data-cmd="saveTxt" data-icon="download">Plain text<small>.txt</small></button>
+    <button class="bs-item" data-cmd="print" data-icon="printer">Print or save as PDF</button>
+  </div>
+  <div class="bs-main">
+    <h1>Your documents</h1>
+    <p class="bs-note">Documents save automatically in this browser as you type.</p>
+    <div id="recent" class="recent"></div>
+  </div>
+</div>
+
+<!-- ============ dialogs ============ -->
+<dialog id="dlg-link" class="dlg">
+  <form method="dialog">
+    <h2>Insert link</h2>
+    <label class="field"><span>Text to display</span><input id="link-text" type="text" autocomplete="off"></label>
+    <label class="field"><span>Address</span><input id="link-url" type="text" placeholder="https://" autocomplete="off" spellcheck="false"></label>
+    <div class="dlg-actions">
+      <button class="btn" value="remove" id="link-remove">Remove link</button>
+      <span class="spacer"></span>
+      <button class="btn" value="cancel">Cancel</button>
+      <button class="btn primary" value="ok">Insert</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="dlg-count" class="dlg">
+  <form method="dialog">
+    <h2>Word count</h2>
+    <dl class="stats" id="stats"></dl>
+    <div class="dlg-actions"><span class="spacer"></span><button class="btn primary" value="ok">Done</button></div>
+  </form>
+</dialog>
+
+<input type="file" id="file-image" accept="image/*" hidden>
+<input type="file" id="file-open" accept=".docx,.html,.htm,.txt,.md" hidden>
+<div id="toast" class="toast" role="status" hidden></div>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
