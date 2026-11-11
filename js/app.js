@@ -1023,7 +1023,7 @@ const FILE_TYPES = [
   { description: 'Inkwell web page (keeps all formatting)', accept: { 'text/html': ['.html'] } },
   { description: 'Plain text', accept: { 'text/plain': ['.txt'] } },
 ];
-let fileHandle = null, fileDocId = null;
+let fileHandle = null, fileDocId = null, noPicker = false;
 async function blobFor(name) {
   if (/\.html?$/i.test(name)) return buildHtml();
   if (/\.(txt|md)$/i.test(name)) return new Blob([editor.innerText], { type: 'text/plain' });
@@ -1032,20 +1032,26 @@ async function blobFor(name) {
 async function saveToDevice(saveAs) {
   $('#backstage').hidden = true;
   await flush();
-  if (!window.showSaveFilePicker) {
+  const viaDownload = async () => {
     try {
       download(await blobFor('x.docx'), fileBase() + '.docx');
       toast('Saved to your Downloads folder as a Word document.');
     } catch (err) { console.error(err); toast('Sorry, the document could not be saved.'); }
-    return;
-  }
+  };
+  if (!window.showSaveFilePicker || noPicker) return viaDownload();
   let handle = fileDocId === doc.id ? fileHandle : null;
   if (!handle || saveAs) {
+    const asked = performance.now();
     try {
       handle = await window.showSaveFilePicker({ suggestedName: fileBase() + '.docx', types: FILE_TYPES });
     } catch (err) {
-      if (err && err.name === 'AbortError') return;   // picker cancelled
-      console.error(err); toast('Sorry, the document could not be saved.'); return;
+      // A real cancel takes a person a moment. An instant abort, or any other error,
+      // means this browser has the API but cannot show the dialog (embedded browsers,
+      // some in-app views), so save as a download instead of silently doing nothing.
+      if (err && err.name === 'AbortError' && performance.now() - asked > 350) return;
+      if (!err || err.name !== 'AbortError') console.error(err);
+      noPicker = true;
+      return viaDownload();
     }
   }
   try {
