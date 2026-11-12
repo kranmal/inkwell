@@ -1,6 +1,6 @@
 // Real pages: splits the editor's flow across page-sized sheets by pushing
 // whole blocks to the next sheet, and draws headers, footers and page numbers.
-let api, sheets, hfLayer, rules, noteRules;
+let api, sheets, decoLayer, hfLayer, rules, noteRules;
 let n = 1, P = 0, H = 0, paged = true, hfSig = '', secs = [], pgs = [], pageWmm = 210;
 const GAP = 24;
 const HF0 = { header: '', headerAlign: 'left', footer: '', footerAlign: 'left', num: 'none', numFormat: '1', firstDiff: false };
@@ -157,6 +157,17 @@ function restoreSel(sel) {
 const contentH = (cl) => { const r = document.createRange(); r.selectNodeContents(cl); return r.getBoundingClientRect().height; };
 const textCells = (tr) => [...tr.cells].filter((c) => c.textContent.trim().length && !c.querySelector('img,table'));
 
+// Room a heading needs below itself so it is never left alone at the foot of a column or page: the gap to the next
+// block plus that block (or, if it can split, its first two lines). 0 when nothing follows on the same page.
+function keepNeed(us, i, sc) {
+  const u = us[i], n = us[i + 1];
+  if (!u.keep || !n || n.brk || n.forced) return 0;
+  const cs = getComputedStyle(n.el);
+  const lhPx = parseFloat(cs.lineHeight) / sc, lh = lhPx > 0 ? lhPx : (parseFloat(cs.fontSize) / sc) * 1.3;
+  const h = n.b - n.t;
+  return Math.max(0, n.t - u.b) + (n.split || n.row ? Math.min(h, 2 * lh) : h);
+}
+
 // Column mode: slide everything from `range` onward (text and atomic inlines) by dx/dy. Nested wrappers add up, so a
 // paragraph can carry on through several columns. Only the visual position moves; line breaks are unchanged.
 function shiftAfter(el, range, dx, dy) {
@@ -201,7 +212,7 @@ function units(ed, landOf, mOf) {
         out.push({ el: tr, land, m, row: true, tsel, sel: `${tsel} > :nth-child(${idx(tr.parentNode)}) > :nth-child(${idx(tr)})`, forced });
         forced = false;
       }
-    } else { out.push({ el, land, m, sel: `#editor > :nth-child(${i})`, forced, split: splittable(el) }); forced = false; }
+    } else { out.push({ el, land, m, sel: `#editor > :nth-child(${i})`, forced, split: splittable(el), keep: /^H[1-6]$/.test(el.tagName) }); forced = false; }
   }
   return out;
 }
@@ -306,6 +317,7 @@ export function layout() {
   if (!api || !api.doc || !sheets) return;
   strip();
   labelBreaks();
+  if (decoLayer) decoLayer.textContent = '';
   const { page, editor, MM } = api;
   const d = api.pageDims();
   H = d.h * MM;
@@ -333,7 +345,9 @@ export function layout() {
   // A picture can never be taller than the smallest page body in the document, so it always fits on a page (object-fit keeps its shape).
   let capH = H - mt - mb;
   if (cols === 1) kids.forEach((_, i) => { capH = Math.min(capH, dimsFor(landOf[i]).h * MM - (mOf[i].t + mOf[i].b) * MM); });
-  const imgCap = `#editor img{max-height:${Math.max(40, capH - 2).toFixed(1)}px;object-fit:contain}`;
+  // Shapes, charts and pictures inside table cells are capped too (a cell's padding and borders need room), so a row of them always fits.
+  const capPx = Math.max(40, capH - 2).toFixed(1), capCell = Math.max(40, capH - 40).toFixed(1);
+  const imgCap = `#editor img{max-height:${capPx}px;object-fit:contain}#editor td img,#editor th img{max-height:${capCell}px}#editor .shape{max-height:${capPx}px !important}#editor .chart svg{max-height:${capPx}px}`;
   wr += imgCap;
   // in column mode every block is narrowed to one column while measuring; the blocks are then slid into place
   rules.textContent = cols > 1 ? `#editor>*{max-width:${colW}px !important;box-sizing:border-box}#editor>table{width:${colW}px !important}` + imgCap : wr;
@@ -396,6 +410,7 @@ export function layout() {
       const py = (q) => (q.top - pr.top) / sc;
       const c0 = c, kk0 = kk, SS0 = SS;
       let did = 0, guard = 0;
+      const segs = [];
       own = null;
       while (u.b + st.get(primary).dy + SS0 > bottom() + 0.5 && guard++ < 100) {
         const lim = pr.top + (bottom() - SS0) * sc;
@@ -418,16 +433,32 @@ export function layout() {
           shiftAfter(cl, cut.range, dxInc, dyInc);
           s.dy += dyInc; s.last = cut.idx; s.top = top() - SS0;
         }
+        segs.push({ kk, c, cut: found.map(([cl]) => cl) });
         did++;
       }
       if (!did) { c = c0; kk = kk0; return false; }
+      // Draw the row's cells (borders and shading) piece by piece, and hide the native ones, which would run on past the column.
+      const rowEnd = u.b + SS0 + st.get(primary).dy;
+      const pieces = [{ kk: kk0, c: c0, y0: u.t + SS0, first: true }, ...segs.map((sg) => ({ kk: sg.kk, c: sg.c, y0: sg.kk * P + mt }))];
+      const csc = [...u.el.cells].map((cl) => ({ r: cl.getBoundingClientRect(), cs: getComputedStyle(cl) }));
+      pieces.forEach((pc, i) => {
+        const last = i === pieces.length - 1, y1 = last ? rowEnd : pc.kk * P + H - mb;
+        csc.forEach(({ r, cs }) => {
+          const bd = (s) => `${cs['border' + s + 'Width']} ${cs['border' + s + 'Style']} ${cs['border' + s + 'Color']}`;
+          const b = document.createElement('div');
+          b.style.cssText = `position:absolute;box-sizing:border-box;left:${((r.left - pr.left) / sc + pc.c * (colW + gapX)).toFixed(2)}px;top:${pc.y0.toFixed(2)}px;width:${(r.width / sc).toFixed(2)}px;height:${Math.max(0, y1 - pc.y0).toFixed(2)}px;background:${cs.backgroundColor};border-top:${bd('Top')};border-left:${bd('Left')};border-right:${bd('Right')};border-bottom:${last ? bd('Bottom') : 'none'}`;
+          decoLayer.append(b);
+        });
+      });
+      css2 += `${u.sel} > *{background:transparent !important;border-color:transparent !important}`;
       own = { x: c0 * (colW + gapX), ss: SS0 };
       SS = SS0 + st.get(primary).dy; parted = true;
       return true;
     };
     const tallRow = (u) => u.row && (u.b - u.t) > colH && textCells(u.el).length > 0;
     const trySplitCols = (u) => (u.row ? splitRowCols(u) : splitCols(u));
-    for (const u of us) {
+    for (let ui = 0; ui < us.length; ui++) {
+      const u = us[ui];
       parted = false; own = null;
       if (u.brk) {
         if (u.el.classList.contains('sect-break')) pend2 = parseSect(u.el);
@@ -440,6 +471,10 @@ export function layout() {
       if (first) { first = false; SS = 0; }
       else if (force || u.forced) { if (c !== 0 || (u.t + SS) > top() + 1) { c = cols - 1; advance(); } SS = top() - u.t; }
       else if (u.b + SS > bottom() + 0.5 && !((u.split || tallRow(u)) && trySplitCols(u))) { if (u.t + SS > top() + 1) { advance(); SS = top() - u.t; } }
+      if (!force && !u.forced && u.keep && !parted && ui > 0) {
+        const need = keepNeed(us, ui, sc);
+        if (need && need < colH && u.b + SS + need > bottom() + 0.5 && u.t + SS > top() + 1) { advance(); SS = top() - u.t; }
+      }
       force = false;
       if (!parted && (u.split || tallRow(u)) && u.b + SS > bottom() + 0.5) trySplitCols(u);
       if (!parted && u.b - u.t > colH) { // taller than a column: it keeps its place and the next block starts on a fresh page
@@ -465,7 +500,8 @@ export function layout() {
   secs = [];
   const CT = () => pgs[k].top + pgs[k].m.t * MM, CB = () => pgs[k].top + pgs[k].h - pgs[k].m.b * MM;
   const nextTop = () => pgs[k].top + pgs[k].h + GAP;
-  for (const u of us) {
+  for (let ui = 0; ui < us.length; ui++) {
+    const u = us[ui];
     if (u.brk && u.el.classList.contains('sect-break')) pend = parseSect(u.el);
     if (u.row) { if (u.tsel !== curT) { curT = u.tsel; tblS0 = S; tblR = 0; } } else if (curT) { carry = S - tblS0 - tblR; curT = null; tblR = 0; }
     const g = Math.max(0, u.t - prevB);
@@ -549,7 +585,8 @@ export function layout() {
     if (!u.brk && !rowSplit) {
       let did = 0;
       if (u.forced) pushWhole();
-      else if (u.split && bNow() > CB() + 0.5 && tNow() < CB() - 2 * (parseFloat(getComputedStyle(u.el).lineHeight) / sc || 18)) did = trySplit();
+      else if (u.keep && ui > 0) { const need = keepNeed(us, ui, sc); if (need && need < CB() - CT() && bNow() + need > CB() + 0.5 && tNow() > CT() + 1) pushWhole(); }
+      if (!u.forced && u.split && bNow() > CB() + 0.5 && tNow() < CB() - 2 * (parseFloat(getComputedStyle(u.el).lineHeight) / sc || 18)) did = trySplit();
       if (!did && !u.forced && bNow() > CB() + 0.5 && tNow() > CT() + 1) pushWhole();
       if (u.split && bNow() > CB() + 0.5) trySplit();
     }
@@ -675,8 +712,10 @@ export function init(a) {
   api = a;
   const { page } = api;
   sheets = document.createElement('div'); sheets.className = 'sheets'; sheets.setAttribute('aria-hidden', 'true');
+  decoLayer = document.createElement('div'); decoLayer.className = 'sheets'; decoLayer.setAttribute('aria-hidden', 'true');
   hfLayer = document.createElement('div'); hfLayer.className = 'hf-layer';
   page.prepend(sheets);
+  sheets.after(decoLayer);
   page.append(hfLayer);
   page.classList.add('paged');
   noteRules = document.createElement('style'); noteRules.id = 'pgs-notes'; noteRules.media = 'screen';
