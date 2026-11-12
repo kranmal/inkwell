@@ -51,6 +51,10 @@ python3 -m http.server 8771
 
 Then open http://localhost:8771
 
+## Tests
+
+Open http://localhost:8771/tests/layout.html. It drives the app in a hidden frame and checks the page layout in 1, 2 and 3 columns: no overlapping text, nothing outside a page, tall rows split and redrawn, headings kept with their text, pictures, text boxes and nested tables capped, and temporary wrappers removed. The frame runs with `?test`, which uses a separate IndexedDB database, so your saved documents are untouched. These checks cover on-screen layout only, not print/PDF or Word.
+
 ## Third-party
 
 - [Typo.js](https://github.com/cfinke/Typo.js) (Modified BSD) for spell checking

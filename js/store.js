@@ -1,5 +1,6 @@
 // Documents live in IndexedDB so they survive reloads without a server.
-const DB = 'inkwell', STORE = 'docs';
+// ?test (used by tests/layout.html) keeps test documents out of the user's real store.
+const DB = /[?&]test\b/.test(location.search) ? 'inkwell-test' : 'inkwell', STORE = 'docs';
 
 function open() {
   return new Promise((res, rej) => {

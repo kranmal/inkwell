@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Inkwell layout tests</title>
+<style>
+  :root { color-scheme: light dark; font: 15px/1.45 system-ui, sans-serif; }
+  body { margin: 0 auto; max-width: 820px; padding: 24px 16px 60px; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  #sum { font-weight: 600; margin: 0 0 16px; }
+  #sum.ok { color: #1a7f37; } #sum.bad { color: #cf222e; }
+  table { border-collapse: collapse; width: 100%; }
+  td { border-bottom: 1px solid #8884; padding: 5px 8px; vertical-align: top; }
+  td:first-child { width: 4.5em; font-weight: 600; }
+  .pass { color: #1a7f37; } .fail { color: #cf222e; }
+  .detail { font: 12px ui-monospace, monospace; opacity: .8; white-space: pre-wrap; }
+  iframe { position: fixed; left: -9999px; top: 0; width: 1300px; height: 900px; border: 0; }
+  button { font: inherit; padding: 4px 12px; }
+</style>
+</head>
+<body>
+<h1>Inkwell layout tests</h1>
+<p>Drives the app in a hidden frame (its own storage, your documents are untouched) and checks the page layout: no overlapping text, nothing outside a page, headings kept with their text, wrappers cleaned up.</p>
+<p><button id="run">Run again</button></p>
+<p id="sum">Running…</p>
+<table id="out"></table>
+<iframe id="app" src="../index.html?test" title="Inkwell under test"></iframe>
+<script>
+const frame = document.getElementById('app');
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+let W, D, ed, page;
+
+const lorem = (n) => Array.from({ length: n }, (_, i) => `Lorem ${i} ipsum dolor sit amet consectetur`).join(' ');
+const svg = (w, h) => 'data:image/svg+xml,' + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><rect width="${w}" height="${h}" fill="#c33"/></svg>`);
+const B = '1px solid #000';
+
+async function boot() {
+  await new Promise((res) => { if (frame.contentDocument && frame.contentDocument.readyState === 'complete' && frame.contentDocument.querySelector('#editor')) res(); else frame.onload = res; });
+  W = frame.contentWindow; D = frame.contentDocument;
+  for (let i = 0; i < 40 && !D.querySelector('.sheets .sheet'); i++) await sleep(100);
+  ed = D.querySelector('#editor'); page = ed.parentElement;
+}
+const sheetsEl = () => page.querySelector('.sheets');
+const pageH = () => Math.round(page.getBoundingClientRect().height);
+
+async function settle() {
+  let last = -1, same = 0;
+  for (let i = 0; i < 40 && same < 3; i++) { await sleep(200); const h = pageH() + '/' + ed.querySelectorAll('.pgs-part').length; same = h === last ? same + 1 : 0; last = h; }
+}
+async function load(html, cols = 1) {
+  ed.innerHTML = html;
+  ed.dispatchEvent(new Event('input', { bubbles: true }));
+  await setCols(cols);
+}
+async function setCols(n) {
+  D.querySelector(`#m-cols [data-val="${n}"]`).click();
+  await settle();
+}
+
+// ---- measurements -------------------------------------------------------
+function textRects() {
+  const out = [], w = D.createTreeWalker(ed, NodeFilter.SHOW_TEXT);
+  let n;
+  while ((n = w.nextNode())) {
+    if (!n.nodeValue.trim()) continue;
+    const p = n.parentElement;
+    if (p.closest('.textbox, td table, [contenteditable="false"]')) continue;
+    const r = D.createRange(); r.selectNodeContents(n);
+    for (const q of r.getClientRects()) if (q.width > 1 && q.height > 3) out.push({ l: q.left, r: q.right, t: q.top, b: q.bottom, n });
+  }
+  return out;
+}
+function overlaps(rs) {
+  const s = [...rs].sort((a, b) => a.t - b.t), bad = [];
+  for (let i = 0; i < s.length; i++) {
+    for (let j = i + 1; j < s.length && s[j].t < s[i].b; j++) {
+      const a = s[i], b = s[j];
+      const ow = Math.min(a.r, b.r) - Math.max(a.l, b.l), oh = Math.min(a.b, b.b) - Math.max(a.t, b.t);
+      if (ow > 3 && oh > 0.45 * Math.min(a.b - a.t, b.b - b.t)) bad.push(`"${a.n.nodeValue.slice(0, 18)}" over "${b.n.nodeValue.slice(0, 18)}"`);
+    }
+  }
+  return bad;
+}
+function outside(rs) {
+  const sh = [...sheetsEl().children].map((s) => s.getBoundingClientRect());
+  return rs.filter((q) => !sh.some((s) => q.t >= s.top - 1 && q.b <= s.bottom + 1 && q.l >= s.left - 1 && q.r <= s.right + 1)).map((q) => `"${q.n.nodeValue.slice(0, 20)}" at y=${Math.round(q.t)}`);
+}
+function orphanHeadings() {
+  const out = [];
+  ed.querySelectorAll('h1,h2,h3').forEach((h) => {
+    const n = h.nextElementSibling; if (!n) return;
+    const a = h.getBoundingClientRect(), b = n.getBoundingClientRect();
+    if (b.top < a.top - 1 || Math.abs(b.left - a.left) > 5 || b.top - a.bottom > 150) out.push(h.textContent);
+  });
+  return out;
+}
+const sheetCount = () => sheetsEl().children.length;
+const bodyMax = () => Math.max(...[...sheetsEl().children].map((s) => s.getBoundingClientRect().height));
+
+// ---- fixtures -----------------------------------------------------------
+const longText = () => Array.from({ length: 30 }, (_, i) => `<p>${lorem(30 + (i % 5) * 20)}</p>`).join('');
+const headings = () => Array.from({ length: 40 }, (_, i) => `<h2>Heading ${i}</h2><p>${lorem(8 + (i % 4) * 8)}</p>`).join('');
+const tallRow = (n) => `<table style="width:100%;border-collapse:collapse"><tbody><tr><td style="border:${B};background:#eef">a</td><td style="border:${B};background:#fee">${Array.from({ length: n }, (_, i) => `line ${i} lorem ipsum dolor`).join(' ')}</td></tr><tr><td style="border:${B}">x</td><td style="border:${B}">y</td></tr></tbody></table>`;
+const shortRows = (n) => `<table style="width:100%;border-collapse:collapse"><tbody>${Array.from({ length: n }, (_, i) => `<tr><td style="border:${B}">r${i}</td><td style="border:${B}">cell ${i}</td></tr>`).join('')}</tbody></table>`;
+
+// ---- tests --------------------------------------------------------------
+const clean = (name, html, cols, opts = {}) => ({
+  name,
+  async run() {
+    await load(html(), cols);
+    const rs = textRects(), f = [];
+    if (opts.pages) { if (sheetCount() < opts.pages) f.push(`expected at least ${opts.pages} pages, got ${sheetCount()}`); }
+    if (opts.parts && !ed.querySelector('.pgs-part')) f.push('expected the text to be split into column parts');
+    f.push(...overlaps(rs).slice(0, 3).map((x) => 'overlap: ' + x), ...outside(rs).slice(0, 3).map((x) => 'outside page: ' + x));
+    return { fail: f, info: `${sheetCount()} pages, ${rs.length} lines` };
+  },
+});
+
+const tests = [
+  { name: 'Short document is one page with no wrappers', async run() {
+    await load('<p>Hello</p><p>World</p>', 1);
+    const f = []; if (sheetCount() !== 1) f.push('pages: ' + sheetCount()); if (ed.querySelector('.pgs-part')) f.push('unexpected column parts');
+    return { fail: f, info: `${sheetCount()} page` };
+  } },
+  clean('Long text, 1 column', longText, 1, { pages: 2 }),
+  clean('Long text, 2 columns', longText, 2, { pages: 2, parts: true }),
+  clean('Long text, 3 columns', longText, 3, { parts: true }),
+  clean('Tall table row, 1 column', () => `<p>intro</p>${tallRow(150)}<p>tail</p>`, 1, { pages: 3 }),
+  clean('Tall table row, 2 columns', () => `<p>intro</p>${tallRow(150)}<p>tail</p>`, 2, { parts: true }),
+  clean('Tall table row, 3 columns', () => `<p>intro</p>${shortRows(40)}${tallRow(120)}<p>${lorem(200)}</p>`, 3, { parts: true }),
+  { name: 'Split row draws continuation cells in columns', async run() {
+    await load(`<p>intro</p>${tallRow(150)}<p>tail</p>`, 2);
+    const n = D.querySelectorAll('.sheets')[1].children.length;
+    return { fail: n < 4 ? [`only ${n} cell boxes drawn`] : [], info: `${n} boxes` };
+  } },
+  ...[1, 2, 3].map((c) => ({ name: `Headings are never stranded, ${c} column${c > 1 ? 's' : ''}`, async run() {
+    await load(headings(), c);
+    const o = orphanHeadings();
+    return { fail: o.map((h) => 'stranded: ' + h), info: `${ed.querySelectorAll('h2').length} headings` };
+  } })),
+  { name: 'Pictures, shapes and charts are capped to a page', async run() {
+    await load(`<p>a</p><table style="width:100%;border-collapse:collapse"><tbody><tr><td style="border:${B}"><img src="${svg(300, 3000)}" width="300" height="3000"></td><td style="border:${B}"><img src="${svg(300, 2500)}" width="300" height="2500"></td></tr></tbody></table><div class="shape shape-round" contenteditable="false" style="width:200px;height:3000px"></div><img src="${svg(400, 4000)}" width="400" height="4000"><p>end</p>`, 1);
+    const lim = bodyMax(), f = [];
+    ed.querySelectorAll('img,.shape').forEach((e, i) => { const h = e.getBoundingClientRect().height; if (h > lim) f.push(`item ${i} is ${Math.round(h)}px, page is ${Math.round(lim)}px`); });
+    const row = ed.querySelector('tr').getBoundingClientRect().height; if (row > lim) f.push(`picture row is ${Math.round(row)}px`);
+    return { fail: f, info: `page ${Math.round(lim)}px` };
+  } },
+  ...[1, 2].map((c) => ({ name: `Text box and nested table are capped, ${c} column${c > 1 ? 's' : ''}`, async run() {
+    const nested = '<table style="border-collapse:collapse"><tbody>' + Array.from({ length: 120 }, (_, i) => `<tr><td style="border:${B}">n${i}</td></tr>`).join('') + '</tbody></table>';
+    const box = '<div class="textbox" style="width:260px">' + Array.from({ length: 150 }, (_, i) => `<p>box line ${i}</p>`).join('') + '</div>';
+    await load(`<p>intro</p><table style="width:100%;border-collapse:collapse"><tbody><tr><td style="border:${B}">${nested}</td><td style="border:${B}">side</td></tr></tbody></table><p>between</p>${box}<p>tail</p>`, c);
+    const lim = bodyMax(), f = [];
+    const bx = ed.querySelector('.textbox').getBoundingClientRect(), rw = ed.querySelector('tr').getBoundingClientRect();
+    if (bx.height > lim) f.push(`text box ${Math.round(bx.height)}px > page ${Math.round(lim)}px`);
+    if (rw.height > lim) f.push(`nested row ${Math.round(rw.height)}px > page ${Math.round(lim)}px`);
+    const tail = [...ed.querySelectorAll('p')].pop().getBoundingClientRect();
+    if (tail.top < bx.bottom - 1 && Math.abs(tail.left - bx.left) < bx.width) f.push('tail paragraph overlaps the text box');
+    return { fail: f, info: `box ${Math.round(bx.height)}px, row ${Math.round(rw.height)}px` };
+  } })),
+  { name: 'Back to 1 column removes every temporary wrapper', async run() {
+    await load(longText(), 2); await setCols(1);
+    const n = ed.querySelectorAll('.pgs-part').length;
+    return { fail: n ? [`${n} wrappers left`] : [], info: 'clean' };
+  } },
+];
+
+async function runAll() {
+  const out = document.getElementById('out'), sum = document.getElementById('sum');
+  out.innerHTML = ''; sum.className = ''; sum.textContent = 'Running…';
+  let pass = 0; window.__results = [];
+  await boot();
+  for (const t of tests) {
+    const tr = out.insertRow(); tr.insertCell().textContent = '…'; tr.insertCell().textContent = t.name;
+    let res;
+    try { res = await t.run(); } catch (e) { res = { fail: ['threw: ' + e.message], info: '' }; }
+    const ok = !res.fail.length; if (ok) pass++;
+    tr.cells[0].textContent = ok ? 'pass' : 'FAIL'; tr.cells[0].className = ok ? 'pass' : 'fail';
+    const d = document.createElement('div'); d.className = 'detail'; d.textContent = ok ? res.info : res.fail.join('\n');
+    tr.cells[1].append(d);
+    window.__results.push({ name: t.name, ok, detail: ok ? res.info : res.fail });
+  }
+  const all = pass === tests.length;
+  sum.textContent = `${pass} of ${tests.length} passed`; sum.className = all ? 'ok' : 'bad';
+  document.title = (all ? 'PASS' : 'FAIL') + ' · Inkwell layout tests';
+  window.__done = true;
+}
+document.getElementById('run').onclick = () => { window.__done = false; runAll(); };
+runAll();
+</script>
+</body>
+</html>
