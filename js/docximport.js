@@ -18,15 +18,16 @@ const parse = (xml) => {
 const read = async (zip, path) => { const f = zip.file(path); return f ? parse(await f.async('string')) : null; };
 
 // Text of a paragraph-bearing element as simple HTML (bold and italic only), paragraphs joined by <br>.
+const paraHtml = (p) => kids(p, 'r').map((r) => {
+  const t = kids(r, 't').map((x) => x.textContent).join('') + (kids(r, 'tab').length ? ' ' : '');
+  if (!t) return '';
+  let h = esc(t);
+  if (kids(r, 'i').length) h = `<i>${h}</i>`;
+  if (kids(r, 'b').length) h = `<b>${h}</b>`;
+  return h;
+}).join('');
 function simpleHtml(el) {
-  return kids(el, 'p').map((p) => kids(p, 'r').map((r) => {
-    const t = kids(r, 't').map((x) => x.textContent).join('') + (kids(r, 'tab').length ? ' ' : '');
-    if (!t) return '';
-    let h = esc(t);
-    if (kids(r, 'i').length) h = `<i>${h}</i>`;
-    if (kids(r, 'b').length) h = `<b>${h}</b>`;
-    return h;
-  }).join('')).filter(Boolean).join('<br>');
+  return kids(el, 'p').map(paraHtml).filter(Boolean).join('<br>');
 }
 
 async function readNotes(zip, file, tag) {
@@ -53,10 +54,87 @@ async function readComments(zip) {
   return out;
 }
 
+// One entry per Word section: header/footer text (undefined when the section has none of its own), orientation, page restart.
+async function sectInfo(zip, docXml) {
+  const docRels = await read(zip, 'word/_rels/document.xml.rels');
+  if (!docRels) return [];
+  const target = new Map([...docRels.getElementsByTagName('Relationship')].map((r) => [r.getAttribute('Id'), r.getAttribute('Target')]));
+  const RN = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
+  const out = [];
+  for (const sect of kids(docXml.documentElement, 'sectPr')) {
+    const o = {};
+    for (const [tag, key] of [['headerReference', 'header'], ['footerReference', 'footer']]) {
+      const ref = kids(sect, tag).find((r) => attr(r, 'type') === 'default');
+      if (!ref) continue;
+      const t = target.get(ref.getAttributeNS(RN, 'id') || ref.getAttribute('r:id'));
+      const part = t && await read(zip, 'word/' + t.replace(/^\/?(word\/)?/, ''));
+      const sl = part && slots(part);
+      o[key] = sl ? sl.filter((x) => x.text).map((x) => x.text).join(' · ') : '';
+    }
+    const sz = kids(sect, 'pgSz')[0];
+    o.landscape = !!sz && (attr(sz, 'orient') === 'landscape' || Number(attr(sz, 'w')) > Number(attr(sz, 'h')));
+    const pn = kids(sect, 'pgNumType')[0];
+    if (pn && attr(pn, 'start') !== '') o.restart = parseInt(attr(pn, 'start'), 10);
+    out.push(o);
+  }
+  // A section without its own header or footer carries on the previous one's.
+  const eff = [];
+  out.forEach((o, i) => eff.push({ ...o, header: o.header !== undefined ? o.header : (eff[i - 1] || {}).header, footer: o.footer !== undefined ? o.footer : (eff[i - 1] || {}).footer }));
+  return eff;
+}
+
+// What a section break should carry: the settings of the section that starts after it, where they differ.
+function sectData(prev, next) {
+  const d = {};
+  if (next.header && next.header !== prev.header) d.header = next.header;
+  if (next.footer && next.footer !== prev.footer) d.footer = next.footer;
+  d.landscape = !!next.landscape;
+  if (next.restart != null && !isNaN(next.restart)) d.restart = next.restart;
+  return d;
+}
+
 // Rewrites the document XML in place and returns what the later steps need.
-function mark(doc, comments, notes) {
+function mark(doc, comments, notes, sects) {
   const refs = [];                       // note references in document order
   const active = new Set();
+  const after = (host, text) => {        // a paragraph holding only a marker, placed right after `host`
+    const p = doc.createElementNS(W, 'w:p'), r = doc.createElementNS(W, 'w:r'), t = doc.createElementNS(W, 'w:t');
+    t.textContent = `${O}${text}${M}${C}`;
+    r.append(t); p.append(r);
+    host.parentNode.insertBefore(p, host.nextSibling);
+  };
+  // Section breaks: each sectPr inside a paragraph ends a section; the break carries the next section's settings.
+  if (sects && sects.length > 1) {
+    kids(doc.documentElement, 'sectPr').filter((sp) => sp.parentNode.localName === 'pPr').forEach((sp, k) => {
+      if (!sects[k + 1]) return;
+      after(sp.parentNode.parentNode, `S|${enc(JSON.stringify(sectData(sects[k], sects[k + 1])))}`);
+    });
+  }
+  // Text boxes: take their text out of the drawing and put it in a paragraph of its own after the host paragraph.
+  for (const tb of kids(doc.documentElement, 'txbxContent')) {
+    let fallback = false, host = null, shape = null, wide = 0;
+    for (let n = tb.parentNode; n && n !== doc; n = n.parentNode) {
+      if (n.localName === 'Fallback') fallback = true;
+      if (n.namespaceURI === W && n.localName === 'p' && !host) host = n;
+      if (!shape && (n.localName === 'drawing' || n.localName === 'pict')) shape = n;
+    }
+    if (shape) {
+      const ex = shape.getElementsByTagName('wp:extent')[0] || [...shape.getElementsByTagName('*')].find((e) => e.localName === 'extent');
+      if (ex) wide = Math.round((Number(ex.getAttribute('cx')) || 0) / 9525);
+    }
+    if (fallback || !host) continue;
+    const html = kids(tb, 'p').map(paraHtml).map((h) => `<p>${h || '<br>'}</p>`).join('');
+    if (html) after(host, `X|${wide}|${enc(html)}`);
+  }
+  // Drop the drawings and their VML fallbacks so the text is not read twice.
+  for (const tb of kids(doc.documentElement, 'txbxContent')) {
+    let top = null;
+    for (let n = tb.parentNode; n && n !== doc; n = n.parentNode) {
+      if (n.localName === 'AlternateContent') { top = n; break; }
+      if (!top && (n.localName === 'drawing' || n.localName === 'pict')) top = n;
+    }
+    if (top && top.parentNode) top.remove();
+  }
   const walk = (el) => {
     for (const n of [...el.childNodes]) {
       if (n.nodeType !== 1) continue;
@@ -119,6 +197,7 @@ function mark(doc, comments, notes) {
 // Turns the markers in mammoth's HTML back into elements.
 function unmark(html, comments, notes) {
   let prev;
+  html = html.replace(new RegExp(`<p>(${O}[SX]\\|[^${O}${M}${C}]*${M}${C})</p>`, 'g'), '$1');   // block markers must not sit inside a paragraph
   const used = new Map();                // comment id -> first span emitted (so one comment keeps one id)
   do {
     prev = html;
@@ -133,6 +212,8 @@ function unmark(html, comments, notes) {
         if (!used.has(id)) used.set(id, 'cm' + uid());
         return `<span class="cm" data-cm="${used.get(id)}" data-author="${esc(dec(f[2]))}" data-time="${esc(f[3])}" data-text="${esc(dec(f[4]))}">${body}</span>`;
       }
+      if (f[0] === 'S') return `<div class="page-break sect-break" contenteditable="false" data-sect="${esc(dec(f[1]))}"></div>`;
+      if (f[0] === 'X') return `<div class="textbox"${Number(f[1]) > 40 ? ` style="width:${Math.min(Number(f[1]), 720)}px"` : ''}>${dec(f[2])}</div>`;
       if (f[0] === 'N') {
         const kind = f[1], id = dec(f[2]);
         return `<sup class="${kind === 'f' ? 'fn' : 'en'}-ref" data-fn="${kind}${esc(id)}" contenteditable="false">1</sup>`;
@@ -172,7 +253,7 @@ async function headerFooter(zip) {
   if (!docRels || !body) return null;
   const target = new Map([...docRels.getElementsByTagName('Relationship')].map((r) => [r.getAttribute('Id'), r.getAttribute('Target')]));
   const out = {};
-  const sect = kids(body.documentElement, 'sectPr').pop();
+  const sect = kids(body.documentElement, 'sectPr')[0];   // the first section sets the document-level header and footer
   if (!sect) return null;
   for (const [tag, key] of [['headerReference', 'header'], ['footerReference', 'footer']]) {
     const ref = kids(sect, tag).find((r) => attr(r, 'type') === 'default') || kids(sect, tag)[0];
@@ -201,7 +282,8 @@ export async function prepare(JSZip, arrayBuffer) {
     if (!docXml) return none;
     const notes = { f: await readNotes(zip, 'word/footnotes.xml', 'footnote'), e: await readNotes(zip, 'word/endnotes.xml', 'endnote') };
     const comments = await readComments(zip);
-    const refs = mark(docXml, comments, notes);
+    const sects = await sectInfo(zip, docXml).catch(() => []);
+    const refs = mark(docXml, comments, notes, sects);
     zip.file('word/document.xml', new XMLSerializer().serializeToString(docXml));
     const buffer = await zip.generateAsync({ type: 'arraybuffer' });
     const extra = {};
