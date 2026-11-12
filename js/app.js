@@ -234,7 +234,7 @@ function pageDims() {
   let [w, h] = PAGES[doc.page.size] || PAGES.A4;
   if (doc.page.orient === 'landscape') [w, h] = [h, w];
   const [t, r, b, l] = MARGINS[doc.page.margins] || MARGINS.normal;
-  return { w, h, landscape: doc.page.orient === 'landscape', m: { t, r, b, l }, cols: doc.page.cols || 1 };
+  return { w, h, landscape: doc.page.orient === 'landscape', m: { t, r, b, l }, cols: doc.page.cols || 1, presets: MARGINS };
 }
 function pageCss() {
   const d = pageDims();
@@ -515,7 +515,8 @@ async function insertImageFile(file, range) {
     url = c.toDataURL(file.type === 'image/png' ? 'image/png' : 'image/jpeg', 0.9);
   }
   const d = pageDims();
-  const maxW = ((d.w - d.m.l - d.m.r) * MM) / d.cols;
+  const here = pagesMod.marginsAtCaret ? pagesMod.marginsAtCaret() : { w: d.w, m: d.m };
+  const maxW = ((here.w - here.m.l - here.m.r) * MM) / d.cols;
   const img = document.createElement('img');
   img.src = url; img.alt = file.name.replace(/\.\w+$/, '');
   img.style.width = Math.round(Math.min(probe.naturalWidth, maxW)) + 'px';
@@ -1147,7 +1148,7 @@ function run(cmd, val, el) {
     case 'zoomIn': zoomTo(prefs.zoom + 10); break;
     case 'zoomOut': zoomTo(prefs.zoom - 10); break;
     case 'zoom': zoomTo(Number(val) || 100); break;
-    case 'zoomFit': zoomTo(Math.floor(((canvas.clientWidth - 48) / (pageDims().w * MM)) * 20) * 5); break;
+    case 'zoomFit': zoomTo(Math.floor(((canvas.clientWidth - 48) / (pagesMod.pageWidthMm() * MM)) * 20) * 5); break;
     case 'print': $('#backstage').hidden = true; window.print(); break;
     case 'backstage': toggleBackstage(); break;
     case 'new': createDoc('Untitled document', ''); break;
@@ -1360,7 +1361,7 @@ document.addEventListener('keydown', (e) => {
   if (e.altKey && /^Digit[0-3]$/.test(e.code)) { e.preventDefault(); applyStyle(['normal', 'h1', 'h2', 'h3'][Number(e.code.slice(5))]); }
 });
 let zoomBefore = null;
-window.addEventListener('beforeprint', () => { proof.clearMarks(); clearFind(); selectImg(null); zoomBefore = page.style.zoom; page.style.zoom = ''; });
+window.addEventListener('beforeprint', () => { const pp = $('#print-page'); if (pp) pp.textContent = pageCss(); proof.clearMarks(); clearFind(); selectImg(null); zoomBefore = page.style.zoom; page.style.zoom = ''; });
 window.addEventListener('afterprint', () => { page.style.zoom = zoomBefore || ''; proof.schedule(0); if (findOpen()) findRun(true); });
 window.addEventListener('pagehide', () => { if ($('#save-state').textContent !== 'Saved') save(); });
 
