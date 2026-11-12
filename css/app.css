@@ -349,3 +349,31 @@ body.focus .titlebar, body.focus .tabs, body.focus .ribbon, body.focus .statusba
   .page { width: auto; min-height: 0; padding: 0; margin: 0; box-shadow: none; zoom: 1 !important; background: #fff; }
   #editor { min-height: 0; }
 }
+
+/* ---- New feature UI ---- */
+.img-bar .for-obj { display: none; }
+.img-box[data-kind="eq"] .for-obj, .img-box[data-kind="wordart"] .for-obj, .img-box[data-kind="smartart"] .for-obj { display: inline-flex; }
+.img-box[data-kind="eq"] .img-handle, .img-box[data-kind="wordart"] .img-handle { display: none; }
+.tpl-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin: 12px 0; }
+.tpl { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; text-align: left; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); transition: border-color .12s ease, background-color .12s ease; }
+.tpl:hover { border-color: var(--accent); background: var(--hover); }
+.tpl-name { font-weight: 600; }
+.tpl-note { font-size: 12px; color: var(--muted); }
+.ver-list { display: flex; flex-direction: column; gap: 6px; max-height: 320px; overflow: auto; margin: 10px 0; }
+.ver { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; }
+.ver-main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.ver-main span, .ver-empty { font-size: 12px; color: var(--muted); }
+.protect-bar { display: flex; align-items: center; gap: 10px; justify-content: center; padding: 8px 12px; margin-bottom: 10px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; font-size: 13px; }
+.protect-bar[hidden] { display: none; }
+.thes-out { padding: 4px 14px 14px; overflow: auto; }
+.thes-out h3 { margin: 8px 0; font-size: 14px; }
+.thes-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.thes-w { padding: 4px 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); }
+.thes-w:hover { border-color: var(--accent); background: var(--hover); }
+.thes-empty, .thes-hint { color: var(--muted); font-size: 13px; }
+.mm-count { align-self: center; font-size: 12px; color: var(--muted); padding: 0 6px; }
+.eq-preview { min-height: 52px; display: grid; place-items: center; padding: 10px; margin: 8px 0; border: 1px dashed var(--line-strong); border-radius: 8px; font-size: 22px; background: var(--paper); color: #111; }
+.eq-hint { color: var(--muted); font-size: 13px; }
+.eq-presets { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.btn.sm { height: 26px; padding: 0 8px; font-size: 12px; }
+body.protected .doc { cursor: default; }

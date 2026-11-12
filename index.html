@@ -29,6 +29,8 @@
   <button class="tab" data-tab="insert" role="tab">Insert</button>
   <button class="tab" data-tab="design" role="tab">Design</button>
   <button class="tab" data-tab="layout" role="tab">Layout</button>
+  <button class="tab" data-tab="refs" role="tab">References</button>
+  <button class="tab" data-tab="mail" role="tab">Mailings</button>
   <button class="tab" data-tab="review" role="tab">Review</button>
   <button class="tab" data-tab="view" role="tab">View</button>
   <button class="tab ctx" data-tab="table" role="tab" hidden>Table</button>
@@ -107,6 +109,12 @@
       <button class="rb wide" data-cmd="comment" data-icon="comment">Comment</button>
     </div>
     <div class="grp">
+      <button class="rb wide" data-cmd="equation" data-icon="sigma">Equation</button>
+      <button class="rb wide" data-cmd="wordart" data-icon="wordart">WordArt</button>
+      <button class="rb wide" data-cmd="smartart" data-icon="network">SmartArt</button>
+    </div>
+    <div class="grp">
+      <button class="rb wide" data-cmd="sectionBreak" data-icon="sectionBreak" title="Start a new section with its own header, footer and page numbers">Section break</button>
       <button class="rb wide" data-cmd="date" data-icon="calendar">Date</button>
       <button class="rb wide drop" data-menu="m-symbol" data-icon="omega">Symbol</button>
     </div>
@@ -141,6 +149,49 @@
     </div>
   </div>
 
+  <!-- REFERENCES -->
+  <div class="panel" data-panel="refs">
+    <div class="grp">
+      <button class="rb wide" data-cmd="toc" data-icon="toc">Contents</button>
+      <button class="rb wide" data-cmd="footnote" data-icon="footnote">Footnote</button>
+    </div>
+    <div class="grp">
+      <button class="rb wide" data-cmd="caption" data-val="Figure" data-icon="captionIc">Figure caption</button>
+      <button class="rb wide" data-cmd="caption" data-val="Table" data-icon="captionIc">Table caption</button>
+      <button class="rb wide" data-cmd="caption" data-val="Equation" data-icon="captionIc">Equation caption</button>
+      <button class="rb wide" data-cmd="xref" data-icon="link">Cross-reference</button>
+    </div>
+    <div class="grp">
+      <button class="rb wide" data-cmd="idxMark" data-icon="tag">Mark entry</button>
+      <button class="rb wide" data-cmd="index" data-icon="listIdx">Insert index</button>
+    </div>
+    <div class="grp">
+      <button class="rb wide" data-cmd="cite" data-icon="quote">Insert citation</button>
+      <button class="rb wide" data-cmd="biblio" data-icon="book">Bibliography</button>
+      <select class="sel" id="cite-style" data-cmd="citeStyle" aria-label="Citation style" title="Citation style">
+        <option value="apa">APA</option><option value="mla">MLA</option><option value="ieee">IEEE (numbered)</option>
+      </select>
+    </div>
+  </div>
+
+  <!-- MAILINGS -->
+  <div class="panel" data-panel="mail">
+    <div class="grp">
+      <button class="rb wide" data-cmd="mmRecipients" data-icon="users">Recipients</button>
+      <button class="rb wide" data-cmd="mmField" data-icon="tag">Insert field</button>
+    </div>
+    <div class="grp">
+      <button class="rb wide" data-cmd="mmPreview" data-icon="eye">Preview results</button>
+      <button class="rb" data-cmd="mmPrev" data-icon="arrowLeft" title="Previous record" aria-label="Previous record"></button>
+      <span class="mm-count" id="mm-count">No recipients</span>
+      <button class="rb" data-cmd="mmNext" data-icon="arrowRight" title="Next record" aria-label="Next record"></button>
+    </div>
+    <div class="grp">
+      <button class="rb wide" data-cmd="mmFinish" data-icon="filePlus">Finish &amp; merge</button>
+      <button class="rb wide" data-cmd="mmPrint" data-icon="printer">Print all</button>
+    </div>
+  </div>
+
   <!-- REVIEW -->
   <div class="panel" data-panel="review">
     <div class="grp">
@@ -151,6 +202,11 @@
     <div class="grp">
       <button class="rb wide" data-cmd="wordCount" data-icon="hash">Word count</button>
       <button class="rb wide" data-cmd="readAloud" data-icon="volume" id="read-btn">Read aloud</button>
+    </div>
+    <div class="grp">
+      <button class="rb wide" data-cmd="thesaurus" data-icon="book">Thesaurus</button>
+      <button class="rb wide" data-cmd="translate" data-icon="globe">Translate</button>
+      <button class="rb wide" data-cmd="dictate" data-icon="mic" title="Speak and it types (needs a browser with speech recognition)">Dictate</button>
     </div>
     <div class="grp">
       <button class="rb wide" data-cmd="comment" data-icon="comment">New comment</button>
@@ -176,6 +232,11 @@
       <button class="rb" data-cmd="zoomIn" data-icon="plus" title="Zoom in" aria-label="Zoom in"></button>
       <button class="rb wide" data-cmd="zoomFit">Fit width</button>
     </div>
+    <div class="grp">
+      <button class="rb wide" data-cmd="macroRecord" data-icon="record">Record macro</button>
+      <button class="rb wide" data-cmd="macroRun" data-icon="play">Run macro</button>
+      <button class="rb wide" data-cmd="macroDelete" data-icon="trash">Delete macro</button>
+    </div>
   </div>
 
   <!-- TABLE (contextual) -->
@@ -188,6 +249,9 @@
     </div>
     <div class="grp">
       <button class="rb wide" data-cmd="headerRow" data-icon="table">Header row</button>
+      <button class="rb wide" data-cmd="repeatHead" data-icon="header" title="Repeat the header row at the top of each page">Repeat header</button>
+      <button class="rb wide" data-cmd="tableSort" data-icon="sort">Sort</button>
+      <button class="rb wide" data-cmd="tableFormula" data-icon="sigma">Formula</button>
       <button class="rb wide" data-cmd="mergeCells" data-icon="merge">Merge cells</button>
       <button class="rb wide" data-cmd="splitCell" data-icon="split">Split cell</button>
     </div>
@@ -220,6 +284,7 @@
         <button class="rb" data-cmd="imgAlign" data-val="center" title="Centre" data-icon="alignCenter"></button>
         <button class="rb" data-cmd="imgAlign" data-val="right" title="Wrap, right" data-icon="alignRight"></button>
         <button class="rb for-shape" data-menu="m-fill" title="Fill colour" data-icon="palette"></button>
+        <button class="rb for-obj" data-cmd="objEdit" title="Edit" data-icon="edit"></button>
         <button class="rb for-chart" data-cmd="chartEdit" title="Edit chart data" data-icon="chart"></button>
         <button class="rb" data-cmd="imgDelete" title="Delete" data-icon="trash"></button>
       </div>
@@ -395,6 +460,9 @@
     <button class="bs-item" data-cmd="open" data-icon="folder">Open a file…<small>.docx, .html, .txt</small></button>
     <button class="bs-item" data-cmd="save" data-icon="save">Save to this device<small>⌘S</small></button>
     <button class="bs-item" data-cmd="saveAs" data-icon="save">Save as…<small>⇧⌘S</small></button>
+    <button class="bs-item" data-cmd="templates" data-icon="layout">Templates</button>
+    <button class="bs-item" data-cmd="versions" data-icon="clock">Version history</button>
+    <button class="bs-item" data-cmd="protect" data-icon="lock">Protect document<small>Off</small></button>
     <div class="bs-label">Download a copy</div>
     <button class="bs-item" data-cmd="saveDocx" data-icon="download">Word document<small>.docx</small></button>
     <button class="bs-item" data-cmd="saveHtml" data-icon="download">Web page<small>.html</small></button>

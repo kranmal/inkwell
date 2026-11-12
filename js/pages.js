@@ -1,13 +1,27 @@
 // Real pages: splits the editor's flow across page-sized sheets by pushing
 // whole blocks to the next sheet, and draws headers, footers and page numbers.
 let api, sheets, hfLayer, rules;
-let n = 1, P = 0, H = 0, paged = true, hfSig = '';
+let n = 1, P = 0, H = 0, paged = true, hfSig = '', secs = [];
 const GAP = 24;
 const HF0 = { header: '', headerAlign: 'left', footer: '', footerAlign: 'left', num: 'none', numFormat: '1', firstDiff: false };
 const ALIGNS = ['left', 'center', 'right'];
 
 export const hf = () => ({ ...HF0, ...((api && api.doc && api.doc.hf) || {}) });
 export const count = () => n;
+export const sections = () => secs;
+const parseSect = (el) => { try { return JSON.parse(el.dataset.sect || '{}') || {}; } catch { return {}; } };
+// The header/footer settings and page-number offset that apply on page index i (0-based).
+function hfFor(i) {
+  const eff = { ...hf() };
+  let off = 0;
+  for (const s of secs) {
+    if (s.page > i) break;
+    if (s.header !== undefined) eff.header = s.header;
+    if (s.footer !== undefined) eff.footer = s.footer;
+    if (s.restart != null && s.restart !== '') off = s.page - (Number(s.restart) - 1);
+  }
+  return { eff, off };
+}
 
 export function pageAt(clientTop) {
   if (!api || !P) return 1;
@@ -16,7 +30,7 @@ export function pageAt(clientTop) {
   return Math.max(1, Math.min(n, Math.floor((clientTop - pr.top) / sc / P) + 1));
 }
 
-function numText(fmt, i, total) {
+function numText0(fmt, i, total) {
   if (fmt === 'page') return `Page ${i}`;
   if (fmt === 'of') return `Page ${i} of ${total}`;
   return String(i);
@@ -53,6 +67,41 @@ export function marginBoxes() {
   }
   return out;
 }
+// Print: named pages give each section its own header, footer and orientation. Browser support varies.
+export function sectionCss() {
+  if (!api || !api.doc || !paged) return '';
+  const ed = api.editor;
+  const kids = [...ed.children];
+  if (!kids.some((el) => el.classList.contains('sect-break'))) return '';
+  const base = hf(), d = api.pageDims();
+  let css = '', cur = { ...base }, name = 0, rules2 = '';
+  const fam = getComputedStyle(ed).fontFamily;
+  let prevHeader = base.header, prevFooter = base.footer;
+  kids.forEach((el, idx) => {
+    if (el.classList.contains('sect-break')) {
+      const s = parseSect(el);
+      name++;
+      cur = { ...cur, ...(s.header !== undefined ? { header: s.header } : {}), ...(s.footer !== undefined ? { footer: s.footer } : {}) };
+      const z = slotParts(cur);
+      const boxes = ['top', 'bottom'].flatMap((zn) => ALIGNS.map((a) => {
+        const parts = z[zn][a];
+        if (!parts.length) return `@${zn}-${a} { content: none; }`;
+        const content = parts.map((p) => typeof p === 'string' ? q(p) : (cur.numFormat === 'page' ? '"Page " counter(page)' : cur.numFormat === 'of' ? '"Page " counter(page) " of " counter(pages)' : 'counter(page)')).join(' ');
+        return `@${zn}-${a} { content: ${content}; font: 9pt ${fam}; color: #6b6b6b; }`;
+      })).join(' ');
+      const size = s.landscape ? `${d.h}mm ${d.w}mm` : `${d.w}mm ${d.h}mm`;
+      css += `@page sec${name} { size: ${size}; ${boxes} } `;
+      rules2 += `#editor > :nth-child(${idx + 2}) { page: sec${name}; ${s.restart != null && s.restart !== '' ? `counter-reset: page ${Number(s.restart)};` : ''} } `;
+      // every following block (until the next section break) shares the named page
+      for (let j = idx + 2; j < kids.length; j++) {
+        if (kids[j].classList.contains('sect-break')) break;
+        rules2 += `#editor > :nth-child(${j + 1}) { page: sec${name}; } `;
+      }
+    }
+  });
+  void prevHeader; void prevFooter;
+  return ' ' + css + rules2;
+}
 export function firstPageCss() {
   if (!api || !api.doc || !hf().firstDiff) return '';
   return ` @page :first { ${['top', 'bottom'].flatMap((zn) => ALIGNS.map((a) => `@${zn}-${a} { content: none; }`)).join(' ')} }`;
@@ -84,6 +133,7 @@ export function layout() {
     page.style.height = '';
     P = H;
     n = Math.max(1, Math.ceil((page.offsetHeight - 2) / H));
+    secs = [];
     drawSheets(1, true);
     drawHf(d, true);
     return;
@@ -96,8 +146,10 @@ export function layout() {
     const r = u.el.getBoundingClientRect();
     u.t = (r.top - pr.top) / sc; u.b = (r.bottom - pr.top) / sc;
   }
-  let S = 0, k = 0, prevB = mt, css = '';
+  let S = 0, k = 0, prevB = mt, css = '', pend = null;
+  secs = [];
   for (const u of us) {
+    if (u.brk && u.el.classList.contains('sect-break')) pend = parseSect(u.el);
     const g = Math.max(0, u.t - prevB);
     const t = u.t + S;
     let b = u.b + S;
@@ -106,6 +158,7 @@ export function layout() {
       const delta = (k + 1) * P + mt - t;
       if (delta > 0) { css += `${u.sel}{margin-top:${(g + delta).toFixed(2)}px !important}`; S += delta; b += delta; }
       k++;
+      if (pend) { secs.push({ ...pend, page: k }); pend = null; }
     }
     k = Math.max(k, Math.floor((b - 1) / P));
     prevB = u.b;
@@ -129,7 +182,7 @@ function drawSheets(num, whole) {
 function drawHf(d, whole) {
   const h = hf(), MM = api.MM;
   const fam = getComputedStyle(api.editor).fontFamily;
-  const sig = JSON.stringify([h, n, d, whole, fam, whole ? api.page.offsetHeight : 0]);
+  const sig = JSON.stringify([h, secs, n, d, whole, fam, whole ? api.page.offsetHeight : 0]);
   if (sig === hfSig) return;
   hfSig = sig;
   const z = slotParts(h);
@@ -137,7 +190,9 @@ function drawHf(d, whole) {
   let html = '';
   const zone = (which, i, top, height) => {
     const blank = h.firstDiff && i === 0;
-    const parts = z[which];
+    const pg = hfFor(i);
+    const parts = slotParts(pg.eff)[which];
+    const numText = (f, k, t) => numText0(f, k - pg.off, t);
     const any = !blank && ALIGNS.some((a) => parts[a].length);
     const cells = ALIGNS.map((a) => `<span class="hf-${a}">${blank ? '' : parts[a].map((p) => api.esc(typeof p === 'string' ? p : numText(h.numFormat, i + 1, n))).join(' · ')}</span>`).join('');
     const name = which === 'top' ? 'header' : 'footer';
@@ -153,7 +208,7 @@ function drawHf(d, whole) {
     // one continuous sheet: footer sits at the very bottom
     const parts = z.bottom, any = ALIGNS.some((a) => parts[a].length);
     html = html.replace('<div class="hf-zone hf-footer-wrap" style="', `<div class="hf-zone hf-footer${any ? '' : ' empty'}" title="Double-click to edit the footer" style="padding:0 ${d.m.r * MM}px 0 ${d.m.l * MM}px;`)
-      .replace(/<\/div>$/, (any ? ALIGNS.map((a) => `<span class="hf-${a}">${parts[a].map((p) => api.esc(typeof p === 'string' ? p : numText(h.numFormat, 1, n))).join(' · ')}</span>`).join('') : '<span class="hf-hint">Double-click to add a footer</span>') + '</div>');
+      .replace(/<\/div>$/, (any ? ALIGNS.map((a) => `<span class="hf-${a}">${parts[a].map((p) => api.esc(typeof p === 'string' ? p : numText0(h.numFormat, 1, n))).join(' · ')}</span>`).join('') : '<span class="hf-hint">Double-click to add a footer</span>') + '</div>');
   }
   hfLayer.style.fontFamily = fam;
   hfLayer.innerHTML = html;
@@ -172,6 +227,27 @@ function openDialog() {
   dlg.showModal();
 }
 
+async function editSect(el) {
+  const s = parseSect(el), h = hf();
+  const v = await api.ask('Section settings', [
+    { id: 'header', label: 'Header for this section (blank keeps the previous one)', value: s.header !== undefined ? s.header : '' },
+    { id: 'footer', label: 'Footer for this section (blank keeps the previous one)', value: s.footer !== undefined ? s.footer : '' },
+    { id: 'restart', label: 'Restart page numbers at (blank continues)', type: 'number', value: s.restart != null ? s.restart : '' },
+    { id: 'landscape', label: 'Landscape orientation', type: 'check', value: !!s.landscape },
+  ], { ok: 'Apply', note: 'These apply to the pages after this break. Landscape shows in Word export and print; on screen the page stays one size.' });
+  if (!v) return;
+  const o = {};
+  if (v.header.trim()) o.header = v.header.trim();
+  if (v.footer.trim()) o.footer = v.footer.trim();
+  if (String(v.restart).trim() !== '') o.restart = Math.max(0, parseInt(v.restart, 10) || 1);
+  if (v.landscape) o.landscape = true;
+  api.begin();
+  el.dataset.sect = JSON.stringify(o);
+  api.done();
+  void h; hfSig = '';
+  api.changed();
+}
+
 export function init(a) {
   api = a;
   const { page } = api;
@@ -185,6 +261,13 @@ export function init(a) {
 
   hfLayer.addEventListener('dblclick', (e) => { if (e.target.closest('.hf-zone')) openDialog(); });
   api.cmd('hf', openDialog);
+  api.cmd('sectionBreak', () => {
+    const d = document.createElement('div');
+    d.className = 'page-break sect-break'; d.contentEditable = 'false'; d.dataset.sect = '{}';
+    api.begin(); api.caretIn(api.insertBlock(d)); api.done();
+    editSect(d);
+  });
+  api.editor.addEventListener('dblclick', (e) => { const b = e.target.closest && e.target.closest('.sect-break'); if (b) editSect(b); });
   api.$('#dlg-hf').addEventListener('close', (e) => {
     if (e.target.returnValue !== 'ok') return;
     api.doc.hf = {

@@ -95,3 +95,44 @@
   .doc .cm { background: none; border: 0; }
   .doc .toc p { cursor: auto; }
 }
+
+/* ---- References, equations, WordArt, SmartArt, sections, mail merge ---- */
+.doc p.caption { font-size: 9pt; font-style: italic; color: #44546a; margin: 4pt 0 8pt; }
+.doc .cap-num { font-style: italic; font-weight: 600; }
+.doc .xref { color: #1f5fbf; text-decoration: underline dotted; text-underline-offset: 2px; }
+.doc .idx { display: none; }
+.doc .index { margin: 10pt 0; }
+.doc .index-title { font-weight: 700; font-size: 1.15em; margin: 0 0 6pt; }
+.doc .index-letter { font-weight: 700; margin: 8pt 0 2pt; }
+.doc .index-empty { color: #8a8a8a; font-style: italic; }
+.doc .index-row { display: flex; align-items: baseline; gap: 6px; margin: 0; }
+.doc .index-row > span:first-child { flex: none; }
+.doc .index-row::after { content: ""; order: 1; flex: 1; border-bottom: 1px dotted #8a8a8a; transform: translateY(-3px); }
+.doc .index-row .index-pg { order: 2; flex: none; }
+.doc .index-row.index-sub { padding-left: 1.5em; }
+.doc .biblio { margin: 10pt 0; }
+.doc .biblio p { margin: 0 0 6pt; padding-left: 0.5in; text-indent: -0.5in; }
+.doc .cite { color: inherit; }
+.doc .eq { font-family: "Cambria Math", "STIX Two Math", "Latin Modern Math", serif; font-size: 1.1em; padding: 0 2px; }
+.doc .eq math { font-size: inherit; }
+.doc .wordart { font: 800 28pt/1.1 system-ui, sans-serif; display: inline-block; letter-spacing: .5px; padding: 2px 4px; }
+.doc .wordart.wa-solid { color: var(--wa, #2b579a); }
+.doc .wordart.wa-outline { color: transparent; -webkit-text-stroke: 1.5px var(--wa, #2b579a); }
+.doc .wordart.wa-shadow { color: var(--wa, #2b579a); text-shadow: 3px 3px 0 rgba(0,0,0,.25); }
+.doc .wordart.wa-gradient { background: linear-gradient(90deg, var(--wa, #2b579a), #c2185b); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.doc .wordart.wa-emboss { color: #d7dbe2; text-shadow: -1px -1px 0 #fff, 1px 1px 0 #8a93a3; }
+.doc figure.smartart { margin: 10pt auto; text-align: center; }
+.doc figure.smartart svg, .doc figure.smartart img { max-width: 100%; height: auto; }
+.doc .tf { background: rgba(43,87,154,.08); border-radius: 3px; padding: 0 2px; }
+.doc .mfield { background: #fff4c2; color: #6b5200; border-radius: 3px; padding: 0 3px; font-size: .92em; white-space: nowrap; }
+.doc .mfield.mf-live { background: #dff3e1; color: #1d5c27; }
+.doc .page-break.sect-break { border-top: 2px dashed #6f8fc4; }
+.doc .page-break.sect-break::after { content: "Section break"; color: #4a6fb0; }
+.doc table.rep-head thead, .doc table.rep-head tr:first-child { break-inside: avoid; }
+@media print {
+  .doc .page-break.sect-break { border: 0; }
+  .doc .page-break.sect-break::after { display: none; }
+  .doc .mfield, .doc .mfield.mf-live { background: none; color: inherit; padding: 0; }
+  .doc .tf { background: none; }
+  .doc thead { display: table-header-group; }
+}
