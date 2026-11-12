@@ -347,10 +347,15 @@ export function layout() {
   if (cols === 1) kids.forEach((_, i) => { capH = Math.min(capH, dimsFor(landOf[i]).h * MM - (mOf[i].t + mOf[i].b) * MM); });
   // Shapes, charts and pictures inside table cells are capped too (a cell's padding and borders need room), so a row of them always fits.
   const capPx = Math.max(40, capH - 2).toFixed(1), capCell = Math.max(40, capH - 40).toFixed(1);
-  const imgCap = `#editor img{max-height:${capPx}px;object-fit:contain}#editor td img,#editor th img{max-height:${capCell}px}#editor .shape{max-height:${capPx}px !important}#editor .chart svg{max-height:${capPx}px}`;
+  const imgCap = `#editor img{max-height:${capPx}px;object-fit:contain}#editor td img,#editor th img{max-height:${capCell}px}#editor .shape{max-height:${capPx}px !important}#editor .chart svg{max-height:${capPx}px}#editor .textbox{max-height:${capPx}px;overflow:auto}`;
   wr += imgCap;
   // in column mode every block is narrowed to one column while measuring; the blocks are then slid into place
   rules.textContent = cols > 1 ? `#editor>*{max-width:${colW}px !important;box-sizing:border-box}#editor>table{width:${colW}px !important}` + imgCap : wr;
+  // A table nested in a cell that is taller than a page can't be cut, so it scrolls inside its cell instead.
+  const path = (el) => { const s = []; for (let e = el; e && e !== editor; e = e.parentNode) s.unshift(`:nth-child(${idx(e)})`); return '#editor>' + s.join('>'); };
+  const nestedCap = [...editor.querySelectorAll('td table, th table')].filter((tb) => tb.offsetHeight > capH - 40)
+    .map((tb) => `${path(tb)}{display:block;max-height:${capCell}px;overflow:auto}`).join('');
+  if (nestedCap) { wr += nestedCap; rules.textContent += nestedCap; }
   paged = true;
   P = H + GAP;
   const pr = page.getBoundingClientRect();
