@@ -4,6 +4,7 @@ import { store } from './store.js';
 import { blocksOf, toRange } from './textmap.js';
 import * as proof from './proof.js';
 import { exportDocx, loadScript } from './docx.js';
+import { prepare as prepareDocx } from './docximport.js';
 import * as pagesMod from './pages.js';
 const noGaps = (h) => h.replace(/<span class="pg-gap"[^>]*><\/span>/g, '');
 import * as tablesMod from './tables.js';
@@ -946,10 +947,12 @@ async function openFile(file) {
   try {
     if (ext === 'docx') {
       const mammoth = await loadScript('vendor/mammoth.browser.min.js', 'mammoth');
-      const res = await mammoth.convertToHtml({ arrayBuffer: await file.arrayBuffer() }, {
+      const JSZip = await loadScript('vendor/jszip.min.js', 'JSZip');
+      const rich = await prepareDocx(JSZip, await file.arrayBuffer());
+      const res = await mammoth.convertToHtml({ arrayBuffer: rich.buffer }, {
         styleMap: ["p[style-name='Title'] => p.doc-title:fresh", "p[style-name='Subtitle'] => p.doc-subtitle:fresh", "p[style-name='Quote'] => p.quote:fresh", "p[style-name='No Spacing'] => p.no-spacing:fresh"],
       });
-      await createDoc(name, clean(res.value, { full: true }));
+      await createDoc(name, clean(rich.finish(res.value), { full: true }), rich.extra);
     } else if (ext === 'html' || ext === 'htm') {
       const text = await file.text();
       const d = new DOMParser().parseFromString(text, 'text/html');
