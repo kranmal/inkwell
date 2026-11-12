@@ -10,6 +10,11 @@ import * as refsMod from './refs.js';
 import * as reviewMod from './review.js';
 import * as objectsMod from './objects.js';
 import * as stylesMod from './styles.js';
+import * as citeMod from './cite.js';
+import * as extrasMod from './extras.js';
+import * as tablexMod from './tablex.js';
+import * as docsMod from './docs.js';
+import * as toolsMod from './tools.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -57,11 +62,11 @@ let lastColor = '#e5484d', lastHilite = '#fff59d';
 const newDoc = (title = 'Untitled document') => ({
   id: 'd' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7), title, theme: 'modern',
   page: { size: sysLang === 'en_US' ? 'Letter' : 'A4', orient: 'portrait', margins: 'normal', cols: 1 }, created: Date.now(), updated: Date.now(),
-  hf: null, styles: null, themeCustom: null, track: false,
+  hf: null, styles: null, themeCustom: null, track: false, x: {},
 });
 
 // Feature modules (pages, tables, refs, review, objects, styles) plug in here.
-const ext = { cmds: {}, meta: [], afterLayout: [], load: [], refresh: [], side: [], paste: [] };
+const ext = { cmds: {}, meta: [], afterLayout: [], load: [], refresh: [], side: [], paste: [], guard: [], ran: [], saved: [], backstage: [] };
 
 // ---------- small helpers ----------
 let toastTimer;
@@ -210,7 +215,7 @@ async function save() {
   if (!doc) return;
   doc.updated = Date.now();
   const rec = { ...doc, html: editor.innerHTML, excerpt: editor.innerText.replace(/\s+/g, ' ').trim().slice(0, 180) };
-  try { await store.put(rec); setSave('Saved'); } catch { setSave('Not saved: browser storage is unavailable'); }
+  try { await store.put(rec); setSave('Saved'); for (const f of ext.saved) f(rec); } catch { setSave('Not saved: browser storage is unavailable'); }
   prefs.lastId = doc.id; savePrefs();
 }
 
@@ -223,7 +228,7 @@ function pageDims() {
 }
 function pageCss() {
   const d = pageDims();
-  return `@page { size: ${d.w}mm ${d.h}mm; margin: ${d.m.t}mm ${d.m.r}mm ${d.m.b}mm ${d.m.l}mm; ${pagesMod.marginBoxes()} }${pagesMod.firstPageCss()}`;
+  return `@page { size: ${d.w}mm ${d.h}mm; margin: ${d.m.t}mm ${d.m.r}mm ${d.m.b}mm ${d.m.l}mm; ${pagesMod.marginBoxes()} }${pagesMod.firstPageCss()}${pagesMod.sectionCss()}`;
 }
 function applyPage() {
   const d = pageDims();
@@ -516,7 +521,7 @@ async function insertImageFile(file, range) {
 
 // images: select, resize, wrap
 function selectImg(img) { selImg = img; placeImgBox(); }
-const objKind = (el) => (el.tagName === 'IMG' ? 'img' : el.classList.contains('shape') ? 'shape' : el.classList.contains('chart') ? 'chart' : 'textbox');
+const objKind = (el) => (el.tagName === 'IMG' ? 'img' : el.classList.contains('shape') ? 'shape' : el.classList.contains('chart') ? 'chart' : el.classList.contains('textbox') ? 'textbox' : el.classList.contains('wordart') ? 'wordart' : el.classList.contains('eq') ? 'eq' : 'smartart');
 function placeImgBox() {
   const box = $('#img-box');
   if (!selImg || !selImg.isConnected) { selImg = null; box.hidden = true; return; }
@@ -665,9 +670,7 @@ function replaceAll() {
 // ---------- side panes, menus ----------
 function showSide(which) {
   $('#side-pane').hidden = !which;
-  $('#proof-pane').hidden = which !== 'proof';
-  $('#find-pane').hidden = which !== 'find';
-  $('#review-pane').hidden = which !== 'review';
+  $$('#side-pane > section').forEach((sec) => { sec.hidden = sec.id !== which + '-pane'; });
   for (const f of ext.side) f(which);
   if (which !== 'find') clearFind();
   if (which === 'proof') { proofSig = null; renderProof(); }
@@ -844,16 +847,19 @@ function readAloud() {
 // ---------- cleaning imported / pasted HTML ----------
 const KEEP_CLASS = new Set(['doc-title', 'doc-subtitle', 'no-spacing', 'quote', 'page-break', 'fn-ref', 'en-ref', 'footnotes', 'endnotes',
   'toc', 'toc-title', 'toc-empty', 'toc-1', 'toc-2', 'toc-3', 'toc-t', 'toc-pg', 'cm', 'tc', 'shape', 'shape-rect', 'shape-round', 'shape-ellipse',
-  'shape-tri', 'shape-arrow', 'shape-line', 'shape-star', 'textbox', 'chart', 'tb-none', 'tb-outer', 'tb-horizontal', 'tb-striped']);
-const KEEP_ATTR = new Set(['alt', 'colspan', 'rowspan', 'data-fn', 'data-cm', 'data-author', 'data-time', 'data-text', 'data-resolved', 'data-ch', 'data-chart', 'data-i']);
-const LOCKED = '.page-break,.fn-ref,.en-ref,.toc,.shape,.chart';
+  'shape-tri', 'shape-arrow', 'shape-line', 'shape-star', 'textbox', 'chart', 'tb-none', 'tb-outer', 'tb-horizontal', 'tb-striped',
+  'caption', 'cap-num', 'xref', 'idx', 'index', 'cite', 'biblio', 'eq', 'wordart', 'wa-solid', 'wa-outline', 'wa-shadow', 'wa-gradient', 'wa-emboss', 'smartart',
+  'tf', 'mfield', 'sect-break', 'rep-head']);
+const KEEP_ATTR = new Set(['alt', 'colspan', 'rowspan', 'data-fn', 'data-cm', 'data-author', 'data-time', 'data-text', 'data-resolved', 'data-ch', 'data-chart', 'data-i',
+  'data-id', 'data-ref', 'data-k', 'data-cap', 'data-term', 'data-src', 'data-eq', 'data-sa', 'data-f', 'data-dp', 'data-field', 'data-sect']);
+const LOCKED = '.page-break,.fn-ref,.en-ref,.toc,.shape,.chart,.cap-num,.xref,.index,.cite,.biblio,.eq,.wordart,.smartart,.tf,.mfield,.sect-break';
 const STYLE_FULL = ['font-weight', 'font-style', 'text-decoration-line', 'color', 'background-color', 'font-size', 'font-family', 'text-align', 'line-height', 'margin-left', 'margin-right', 'margin-top', 'margin-bottom', 'vertical-align', 'width', 'height', 'float'];
 const STYLE_PASTE = ['font-weight', 'font-style', 'text-decoration-line', 'color', 'background-color', 'text-align', 'vertical-align'];
 const BLOCK_TAGS = new Set(['P', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'LI', 'UL', 'OL', 'TABLE', 'TBODY', 'THEAD', 'TFOOT', 'TR', 'TD', 'TH', 'DIV', 'BLOCKQUOTE', 'PRE', 'HR', 'BODY', 'SECTION', 'ARTICLE', 'BR']);
 const NOISE = /^(normal|400|start|left|baseline|none|rgb\(0, 0, 0\)|rgb\(255, 255, 255\)|rgba\(0, 0, 0, 0\)|transparent|black|white)$/i;
 function clean(html, { full = false, collapse = true } = {}) {
   const d = new DOMParser().parseFromString(html, 'text/html');
-  d.querySelectorAll('script,style,meta,link,title,iframe,object,embed,form,input,button,select,textarea,svg,noscript,template').forEach((n) => n.remove());
+  d.querySelectorAll('script,style,meta,link,title,iframe,object,embed,form,input,button,select,textarea,svg,math,noscript,template').forEach((n) => n.remove());
   const cw = d.createTreeWalker(d.body, NodeFilter.SHOW_COMMENT), dead = [];
   while (cw.nextNode()) dead.push(cw.currentNode);
   dead.forEach((n) => n.remove());
@@ -865,7 +871,7 @@ function clean(html, { full = false, collapse = true } = {}) {
       if (!v || /url\(|expression|var\(/i.test(v) || (!full && NOISE.test(v))) continue;
       css += `${p}:${v};`;
     }
-    if (el.style.display === 'block' && (el.tagName === 'IMG' || el.matches('.shape,.chart,.textbox'))) css += 'display:block;';
+    if (el.style.display === 'block' && (el.tagName === 'IMG' || el.matches('.shape,.chart,.textbox,.wordart,.smartart'))) css += 'display:block;';
     const cls = [...el.classList].filter((c) => KEEP_CLASS.has(c) || /^cs-[a-z0-9]+$/.test(c)).join(' ');
     for (const a of [...el.attributes]) {
       const n = a.name, v = a.value.trim();
@@ -905,7 +911,7 @@ function textToHtml(t, md) {
 // ---------- documents ----------
 function setDoc(d, html) {
   doc = { id: d.id, title: d.title, theme: d.theme || 'modern', page: { ...newDoc().page, ...(d.page || {}) }, created: d.created || Date.now(), updated: d.updated || Date.now(),
-    hf: d.hf || null, styles: d.styles || null, themeCustom: d.themeCustom || null, track: !!d.track };
+    hf: d.hf || null, styles: d.styles || null, themeCustom: d.themeCustom || null, track: !!d.track, x: d.x && typeof d.x === 'object' ? JSON.parse(JSON.stringify(d.x)) : {} };
   editor.innerHTML = html || '<p><br></p>';
   if (!editor.firstElementChild) editor.innerHTML = `<p>${editor.innerHTML || '<br>'}</p>`;
   $('#title').value = doc.title; document.title = doc.title + ' · Inkwell';
@@ -953,7 +959,7 @@ async function openFile(file) {
       const extra = {};
       if (own) {
         if (root.dataset.theme) extra.theme = root.dataset.theme;
-        for (const k of ['hf', 'styles', 'themeCustom']) { try { if (root.dataset[k]) extra[k] = JSON.parse(root.dataset[k]); } catch { /* ignore bad data */ } }
+        for (const k of ['hf', 'styles', 'themeCustom', 'x']) { try { if (root.dataset[k]) extra[k] = JSON.parse(root.dataset[k]); } catch { /* ignore bad data */ } }
       }
       await createDoc(d.title || name, clean(root.innerHTML, { full: true, collapse: !own }), extra);
     } else {
@@ -994,11 +1000,11 @@ async function renderRecent() {
 function toggleBackstage(on = $('#backstage').hidden) {
   $('#backstage').hidden = !on;
   closeMenus();
-  if (on) { flush().then(renderRecent); } else restore();
+  if (on) { flush().then(renderRecent); for (const f of ext.backstage) f(); } else restore();
 }
 
 // ---------- export ----------
-const docxOpts = () => ({ title: doc.title, page: pageDims(), hf: pagesMod.hf(), styles: doc.styles, track: doc.track, author: prefs.author });
+const docxOpts = () => ({ title: doc.title, page: pageDims(), hf: pagesMod.hf(), styles: doc.styles, track: doc.track, author: prefs.author, x: doc.x });
 async function saveDocx() {
   toast('Building Word document…');
   try {
@@ -1010,7 +1016,7 @@ function dataAttrs() {
   let out = '';
   const vars = stylesMod.rootStyle();
   if (vars) out += ` style="${esc(vars)}"`;
-  for (const k of ['hf', 'styles', 'themeCustom']) if (doc[k]) out += ` data-${k === 'themeCustom' ? 'theme-custom' : k}="${esc(JSON.stringify(doc[k]))}"`;
+  for (const k of ['hf', 'styles', 'themeCustom', 'x']) if (doc[k] && (k !== 'x' || Object.keys(doc.x).length)) out += ` data-${k === 'themeCustom' ? 'theme-custom' : k}="${esc(JSON.stringify(doc[k]))}"`;
   return out;
 }
 async function buildHtml() {
@@ -1075,6 +1081,8 @@ async function saveToDevice(saveAs) {
 
 // ---------- commands ----------
 function run(cmd, val, el) {
+  for (const g of ext.guard) if (g(cmd, val, el)) return;
+  for (const f of ext.ran) f(cmd, val, el);
   switch (cmd) {
     case 'undo': restore(); undo(); break;
     case 'redo': restore(); redo(); break;
@@ -1241,7 +1249,7 @@ editor.addEventListener('mousedown', () => { pendingSize = null; });
 editor.addEventListener('mouseup', () => { if (painter && !getSelection().isCollapsed) setTimeout(paint, 0); });
 editor.addEventListener('click', (e) => {
   const t = e.target;
-  const obj = t.tagName === 'IMG' ? t : t.closest && t.closest('.shape,.chart');
+  const obj = t.tagName === 'IMG' ? t : t.closest && t.closest('.shape,.chart,.wordart,.eq,.smartart');
   if (obj) {
     selectImg(obj);
     const r = document.createRange(); r.selectNode(obj);
@@ -1386,17 +1394,49 @@ const WELCOME = [
   '<p><br></p>',
 ].join('');
 
+// A small form dialog built on demand. Resolves to the field values, or null when cancelled.
+function ask(title, fields, { ok = 'OK', note = '', wide = false } = {}) {
+  return new Promise((res) => {
+    const dlg = document.createElement('dialog');
+    dlg.className = 'dlg' + (wide ? ' wide' : '');
+    const f = (x) => {
+      const id = 'ask-' + x.id, v = x.value == null ? '' : x.value;
+      if (x.type === 'check') return `<label class="check"><input type="checkbox" id="${id}"${v ? ' checked' : ''}> ${esc(x.label)}</label>`;
+      let c;
+      if (x.type === 'select') c = `<select id="${id}">${x.options.map((o) => { const [val, lab] = Array.isArray(o) ? o : [o, o]; return `<option value="${esc(val)}"${String(val) === String(v) ? ' selected' : ''}>${esc(lab)}</option>`; }).join('')}</select>`;
+      else if (x.type === 'textarea') c = `<textarea id="${id}" rows="${x.rows || 5}" placeholder="${esc(x.placeholder || '')}" spellcheck="false">${esc(v)}</textarea>`;
+      else c = `<input id="${id}" type="${x.type || 'text'}" value="${esc(v)}" placeholder="${esc(x.placeholder || '')}" autocomplete="off">`;
+      return `<label class="field"><span>${esc(x.label)}</span>${c}</label>`;
+    };
+    dlg.innerHTML = `<form method="dialog"><h2>${esc(title)}</h2>${note ? `<p class="dlg-note">${esc(note)}</p>` : ''}${fields.map(f).join('')}<div class="dlg-actions"><span class="spacer"></span><button class="btn" value="cancel" formnovalidate>Cancel</button><button class="btn primary" value="ok">${esc(ok)}</button></div></form>`;
+    document.body.append(dlg);
+    let out = null;
+    const finish = () => { if (dlg.isConnected) { dlg.remove(); res(out); } };
+    dlg.querySelector('form').addEventListener('submit', (e) => {
+      e.preventDefault();
+      if (!e.submitter || e.submitter.value === 'ok') {
+        out = {};
+        for (const x of fields) { const el = dlg.querySelector('#ask-' + x.id); out[x.id] = x.type === 'check' ? el.checked : el.value; }
+      }
+      dlg.close(); finish();
+    });
+    dlg.addEventListener('cancel', () => setTimeout(finish, 0));
+    dlg.showModal();
+  });
+}
+
 const api = {
   editor, page, canvas, $, $$, esc, ic, MM, COLORS, FONTS, STYLES, prefs, ext,
   begin, done, commit, changed, restore, insertBlock, caretIn, curBlock, selEl, selBlocks, keepSel, toast, pageDims, zoomF,
   closeMenus, placeMenu, showSide, savePrefs, topOf, emptyP, selectImg, placeImgBox, applyPage, applyTheme, refreshUI, inEditor, run,
+  createDoc, setDoc, download, clean, store, fileBase, save, flush, undo, exec, tableCtx, buildHtml, textToHtml, toggleBackstage, ask, newDoc,
   get doc() { return doc; }, get selImg() { return selImg; }, get saved() { return saved; },
   cmd(name, fn) { ext.cmds[name] = fn; },
   on(evt, fn) { ext[evt].push(fn); },
 };
 
 async function start() {
-  for (const m of [pagesMod, tablesMod, refsMod, reviewMod, objectsMod, stylesMod]) m.init(api);
+  for (const m of [pagesMod, tablesMod, refsMod, reviewMod, objectsMod, stylesMod, citeMod, extrasMod, tablexMod, docsMod, toolsMod]) m.init(api);
   buildUI();
   applyDark(); applyLang();
   document.execCommand('defaultParagraphSeparator', false, 'p');
