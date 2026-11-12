@@ -15,7 +15,7 @@ A word processor that runs entirely in the browser. Live at https://kranmal.gith
 - Find and replace, word count, read aloud, outline, focus mode, dark mode
 - Opens .docx, .html, .txt and .md; saves as .docx, .html, .txt or PDF (print)
 - **References:** figure/table/equation captions, cross-references, an index built from marked entries, citations with a bibliography (APA, MLA, IEEE)
-- **Mailings:** mail merge from pasted CSV or spreadsheet data, with live preview and one-document-per-record printing
+- **Mailings:** mail merge from pasted CSV or spreadsheet data, or from a CSV, JSON or Excel file, with live preview and one-document-per-record printing
 - **Equations** (type `\frac{a}{b}`, `\sqrt{x}`, `x^2` and so on; saved as real Word equations), **WordArt** and **SmartArt** (process, cycle, hierarchy, list, pyramid)
 - **Sections** with their own header, footer, page-number restart and orientation
 - **Tables:** sort, repeat header rows, and formulas such as `=SUM(ABOVE)`
@@ -28,17 +28,17 @@ A word processor that runs entirely in the browser. Live at https://kranmal.gith
 
 ## Known limits
 
-- Sections: a different orientation or margin per section is written to .docx and print. On screen all pages share one size, because the page engine uses a single page size.
+- Sections: a different orientation or margin per section is written to .docx and print. On screen all pages share one size, because the page engine uses a single page size; the section break itself says what changes (orientation, header, footer, page-number restart).
 - Document protection is a deterrent that stops editing in Inkwell and sets read-only in the .docx. It is not encryption, and anyone can open the file in another editor.
 - Dictation and translation rely on the browser (speech recognition, and the on-device Translator API). They are unavailable in browsers without them. The thesaurus is a built-in list of about 1,000 words.
 - Version history keeps the latest snapshots in this browser only. Macros record typing and formatting, not mouse selections.
-- Mail merge does its own CSV parsing; there is no Excel file import.
+- Mail merge reads pasted CSV, or a CSV, JSON or Excel (.xlsx, first sheet) file. Excel files are read from the first sheet's stored values and shared strings; formulas show their last saved result, and the Excel path has only been tested on files written by script, not real Excel output.
 - Equation input is a LaTeX-style subset, not the full language.
 - Pages: long paragraphs and list items split across pages at a line boundary (at least two lines stay on each side), and tables break between rows. Pictures, shapes and a single row taller than a page still move whole. Repeated table header rows show on continuation pages in print/PDF and Word, not on screen. In multi-column documents text fills the left column, then the right, then the next page. Each paragraph, list item or table row stays whole in one column (a block taller than a column keeps its place and overflows), so column bottoms are ragged. Print and the HTML export use true CSS columns.
-- Track changes records text you type, delete or paste, and formatting changes (bold, italic, underline, strike, sub/superscript, font, size, colour, highlight), which you can accept or reject. A formatting change in Word export appears as plain formatting, not a Word formatting revision.
+- Track changes records text you type, delete or paste, and formatting changes (bold, italic, underline, strike, sub/superscript, font, size, colour, highlight), which you can accept or reject. In Word export a formatting change is written as a Word formatting revision (w:rPrChange) recording the previous bold, italic, underline, strike, font, size, colour, highlight and sub/superscript.
 - Grammar checking is pattern-based (about 100 rules, including comma splices, long sentences and commonly confused words), so it catches common mistakes rather than everything.
 - Charts come in seven types (column, stacked column, bar, line, area, pie, doughnut) with up to 12 series. In Word export, charts become native Word charts with an embedded workbook, and shapes and text boxes become Word drawing objects; SmartArt is still a picture.
-- Word import (.docx) keeps text, styles, tables, pictures, footnotes, endnotes, comments, tracked changes and the main header and footer. Per-section headers, first-page headers and text boxes are not imported.
+- Word import (.docx) keeps text, styles, tables, pictures, footnotes, endnotes, comments, tracked changes, the first section's header and footer, each later section's own header, footer, orientation and page-number restart, and the text of text boxes (as plain Inkwell text boxes, without fill, border or position). A first-page header's text is not kept, only the "different first page" setting, and anchored text boxes become inline ones. Only checked on files Inkwell wrote, not on real Word files.
 - Word export writes headers, footers, footnotes, endnotes, comments, tracked changes and custom styles. Equations (OMML), section breaks with their own headers, repeated header rows and the protection flag are included, with SmartArt as a picture. Its XML is checked for well-formedness, but the output has not yet been opened in Microsoft Word itself.
 
 ## Run locally
