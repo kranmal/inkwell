@@ -68,6 +68,7 @@
 .doc .cm { background: #fff3bf; border-bottom: 2px solid #eda100; }
 .doc .cm[data-resolved] { background: none; border-bottom: 1px dotted #b5b5b5; }
 .doc ins.tc { color: #1a7f4b; text-decoration: underline; text-decoration-color: #1a7f4b; background: none; }
+.doc span.fc { border-bottom: 2px dotted #b36b00; background: rgba(179,107,0,.08); }
 .doc del.tc { color: #c62f35; text-decoration: line-through; }
 
 /* shapes, text boxes, charts */

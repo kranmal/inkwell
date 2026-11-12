@@ -214,8 +214,60 @@ function pasteTracked(cd) {
   api.done();
   return true;
 }
+// ---------- tracked formatting ----------
+const FMT = { bold: 'Bold', italic: 'Italic', underline: 'Underline', strike: 'Strikethrough', sub: 'Subscript', sup: 'Superscript', fontName: 'Font', fontSize: 'Font size', color: 'Font colour', hilite: 'Highlight', grow: 'Font size', shrink: 'Font size' };
+let fmtBusy = false;
+function guardFormat(cmd, val, el) {
+  if (fmtBusy || !FMT[cmd] || !tracking()) return false;
+  const s = getSelection();
+  if (!s.rangeCount || s.isCollapsed || !api.inEditor(s.anchorNode)) return false;
+  const r = s.getRangeAt(0);
+  const blk = (n) => (n.nodeType === 1 ? n : n.parentElement).closest('p,h1,h2,h3,h4,h5,h6,li,td,th,pre,blockquote');
+  const b = blk(r.startContainer);
+  if (!b || b !== blk(r.endContainer) || r.cloneContents().querySelector('img,table,figure,.eq,[contenteditable="false"]')) return false;
+  if (b.closest('del.tc') || r.startContainer.parentElement.closest('del.tc')) return false;
+  const was = document.createElement('div');
+  was.append(r.cloneContents());
+  const before = was.innerHTML;
+  fmtBusy = true;
+  try { api.run(cmd, val, el); } finally { fmtBusy = false; }
+  const s2 = getSelection();
+  if (!s2.rangeCount || s2.isCollapsed) return true;
+  const r2 = s2.getRangeAt(0);
+  if (blk(r2.startContainer) !== blk(r2.endContainer)) return true;
+  const own = r2.startContainer.parentElement && r2.startContainer.parentElement.closest('span.fc');
+  if (own && own.contains(r2.endContainer) && own.dataset.author === author()) {
+    own.dataset.label = own.dataset.label.includes(FMT[cmd]) ? own.dataset.label : own.dataset.label + ', ' + FMT[cmd];
+    return true;
+  }
+  const w = document.createElement('span');
+  w.className = 'fc';
+  w.dataset.author = author(); w.dataset.time = String(Date.now());
+  w.dataset.label = FMT[cmd]; w.dataset.was = before;
+  const txt = r2.toString();
+  for (;;) {
+    const a = r2.startContainer.nodeType === 3 ? r2.startContainer.parentElement : r2.startContainer;
+    if (!a || a === api.editor || a.tagName !== 'SPAN' || a.matches('.fc,.cm') || a.textContent !== txt) break;
+    r2.selectNode(a);
+  }
+  w.append(r2.extractContents());
+  r2.insertNode(w);
+  const nr = document.createRange();
+  nr.selectNodeContents(w);
+  s2.removeAllRanges(); s2.addRange(nr);
+  api.changed(true);
+  return true;
+}
+function resolveFormat(el, accept) {
+  if (!el || !el.isConnected) return;
+  if (accept) { unwrap(el); return; }
+  const t = document.createElement('template');
+  t.innerHTML = el.dataset.was || '';
+  el.replaceWith(t.content);
+}
 function resolveChange(el, accept) {
   if (!el || !el.isConnected) return;
+  if (el.matches('span.fc')) return resolveFormat(el, accept);
   const keep = el.tagName === 'INS' ? accept : !accept;
   const block = el.closest('p,h1,h2,h3,li,td,th,pre');
   if (keep) unwrap(el); else { const p = el.parentNode; el.remove(); if (p) p.normalize(); }
@@ -229,7 +281,7 @@ function changeAct(act, el) {
   render(true);
 }
 function allChanges(accept) {
-  const els = [...api.editor.querySelectorAll('ins.tc,del.tc')];
+  const els = [...api.editor.querySelectorAll('ins.tc,del.tc,span.fc')];
   if (!els.length) { api.toast('There are no tracked changes.'); return; }
   api.commit();
   els.forEach((el) => resolveChange(el, accept));
@@ -247,20 +299,20 @@ function setTrack(on) {
 // ---------- review pane ----------
 function collect() {
   const out = [], seen = new Set();
-  for (const el of api.editor.querySelectorAll('span.cm,ins.tc,del.tc')) {
+  for (const el of api.editor.querySelectorAll('span.cm,ins.tc,del.tc,span.fc')) {
     if (el.matches('span.cm')) {
       const id = el.dataset.cm;
       if (!id || seen.has(id)) continue;
       seen.add(id);
       out.push({ kind: 'cm', id, el, quote: spansOf(id).map((s) => s.textContent).join(''), text: el.dataset.text || '', author: el.dataset.author || '', time: el.dataset.time, resolved: !!el.dataset.resolved });
-    } else out.push({ kind: el.tagName === 'INS' ? 'ins' : 'del', el, quote: el.textContent, author: el.dataset.author || '', time: el.dataset.time });
+    } else out.push({ kind: el.matches('span.fc') ? 'fc' : el.tagName === 'INS' ? 'ins' : 'del', label: el.dataset.label || '', el, quote: el.textContent, author: el.dataset.author || '', time: el.dataset.time });
   }
   return out;
 }
 function render(force) {
   if (!paneOpen()) return;
   const list = collect();
-  const s = JSON.stringify(list.map((i) => [i.kind, i.id, i.quote, i.text, i.author, i.time, i.resolved]));
+  const s = JSON.stringify(list.map((i) => [i.kind, i.id, i.quote, i.text, i.author, i.time, i.resolved, i.label]));
   if (!force && s === sig) return;
   sig = s; items = list;
   const { esc, ic } = api;
@@ -275,7 +327,7 @@ function render(force) {
         + `<div class="issue-fix"><button class="link-btn" data-act="resolve">${i.resolved ? 'Reopen' : 'Resolve'}</button><button class="link-btn" data-act="edit">Edit</button><button class="link-btn" data-act="delete">Delete</button></div></div>`;
     }
     return `<div class="issue rv-card" data-n="${n}"><div class="issue-top">${ic('track')}${meta}</div>`
-      + `<p class="issue-ctx"><b>${i.kind === 'ins' ? 'Added' : 'Deleted'}</b> “${esc(clip(i.quote))}”</p>`
+      + `<p class="issue-ctx"><b>${i.kind === 'fc' ? 'Formatted: ' + esc(i.label) : i.kind === 'ins' ? 'Added' : 'Deleted'}</b> “${esc(clip(i.quote))}”</p>`
       + `<div class="issue-fix"><button class="link-btn" data-act="accept">Accept</button><button class="link-btn" data-act="reject">Reject</button></div></div>`;
   }).join('');
 }
@@ -310,6 +362,7 @@ export function init(a) {
 
   editor.addEventListener('beforeinput', onBeforeInput);
   api.on('paste', pasteTracked);
+  api.on('guard', guardFormat);
   api.on('meta', () => render(false));
   api.on('side', (which) => { if (which === 'review') render(true); else closeCompose(); });
   api.on('load', () => { setTrack(!!api.doc.track); closeCompose(); sig = ''; render(true); });
