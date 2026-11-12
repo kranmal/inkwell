@@ -1,6 +1,6 @@
 // Real pages: splits the editor's flow across page-sized sheets by pushing
 // whole blocks to the next sheet, and draws headers, footers and page numbers.
-let api, sheets, hfLayer, rules;
+let api, sheets, hfLayer, rules, noteRules;
 let n = 1, P = 0, H = 0, paged = true, hfSig = '', secs = [];
 const GAP = 24;
 const HF0 = { header: '', headerAlign: 'left', footer: '', footerAlign: 'left', num: 'none', numFormat: '1', firstDiff: false };
@@ -196,9 +196,25 @@ function lineSplit(el, yLimit, after) {
   return { idx: first, top: rr.top, range, lh: rr.bottom - rr.top };
 }
 
+// On screen every sheet keeps one size, so a section's orientation can't be drawn; say so on the break itself.
+function labelBreaks() {
+  let css = '', land = !!api.pageDims().landscape;
+  [...api.editor.children].forEach((el, i) => {
+    if (!el.classList.contains('sect-break')) return;
+    const s = parseSect(el), bits = [];
+    if (s.landscape !== undefined && !!s.landscape !== land) { land = !!s.landscape; bits.push(land ? 'landscape from here' : 'portrait from here'); }
+    if (s.header !== undefined) bits.push('own header');
+    if (s.footer !== undefined) bits.push('own footer');
+    if (s.restart != null && s.restart !== '') bits.push(`page numbers restart at ${s.restart}`);
+    if (bits.length) css += `#editor>:nth-child(${i + 1})::after{content:"Section break · ${bits.join(' · ').replace(/"/g, '')} (shown in Word and print)" !important}`;
+  });
+  noteRules.textContent = css;
+}
+
 export function layout() {
   if (!api || !api.doc || !sheets) return;
   strip();
+  labelBreaks();
   const { page, editor, MM } = api;
   const d = api.pageDims();
   H = d.h * MM;
@@ -409,6 +425,8 @@ export function init(a) {
   page.prepend(sheets);
   page.append(hfLayer);
   page.classList.add('paged');
+  noteRules = document.createElement('style'); noteRules.id = 'pg-notes'; noteRules.media = 'screen';
+  document.head.append(noteRules);
   rules = document.createElement('style'); rules.id = 'pg-rules'; rules.media = 'screen';
   document.head.append(rules);
 
