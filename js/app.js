@@ -6,7 +6,15 @@ import * as proof from './proof.js';
 import { exportDocx, loadScript } from './docx.js';
 import { prepare as prepareDocx } from './docximport.js';
 import * as pagesMod from './pages.js';
-const noGaps = (h) => h.replace(/<span class="pg-gap"[^>]*><\/span>/g, '');
+// layout() adds empty .pg-gap spacers and (in columns) .pg-part wrappers; neither belongs in saved, undo or exported HTML
+const noGaps = (h) => {
+  h = h.replace(/<span class="pg-gap"[^>]*><\/span>/g, '');
+  if (!h.includes('pg-part')) return h;
+  const t = document.createElement('template');
+  t.innerHTML = h;
+  t.content.querySelectorAll('.pg-part').forEach((w) => w.replaceWith(...w.childNodes));
+  return t.innerHTML;
+};
 import * as tablesMod from './tables.js';
 import * as refsMod from './refs.js';
 import * as reviewMod from './review.js';
