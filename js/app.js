@@ -5,6 +5,7 @@ import { blocksOf, toRange } from './textmap.js';
 import * as proof from './proof.js';
 import { exportDocx, loadScript } from './docx.js';
 import * as pagesMod from './pages.js';
+const noGaps = (h) => h.replace(/<span class="pg-gap"[^>]*><\/span>/g, '');
 import * as tablesMod from './tables.js';
 import * as refsMod from './refs.js';
 import * as reviewMod from './review.js';
@@ -156,7 +157,7 @@ function selPath() {
 }
 function commit() {
   clearTimeout(H.timer);
-  const html = editor.innerHTML;
+  const html = noGaps(editor.innerHTML);
   if (H.idx >= 0 && H.stack[H.idx].html === html) { H.stack[H.idx].sel = selPath() || H.stack[H.idx].sel; return; }
   H.stack.length = H.idx + 1;
   H.stack.push({ html, sel: selPath() });
@@ -214,7 +215,7 @@ async function save() {
   clearTimeout(saveTimer);
   if (!doc) return;
   doc.updated = Date.now();
-  const rec = { ...doc, html: editor.innerHTML, excerpt: editor.innerText.replace(/\s+/g, ' ').trim().slice(0, 180) };
+  const rec = { ...doc, html: noGaps(editor.innerHTML), excerpt: editor.innerText.replace(/\s+/g, ' ').trim().slice(0, 180) };
   try { await store.put(rec); setSave('Saved'); for (const f of ext.saved) f(rec); } catch { setSave('Not saved: browser storage is unavailable'); }
   prefs.lastId = doc.id; savePrefs();
 }
@@ -1022,7 +1023,7 @@ function dataAttrs() {
 async function buildHtml() {
   const css = await fetch('css/doc.css').then((r) => r.text()).catch(() => '');
   const d = pageDims();
-  const html = `<!doctype html>\n<html lang="${editor.lang}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="generator" content="Inkwell"><title>${esc(doc.title)}</title><style>${css}\nbody{margin:0;background:#f1f1ee}.doc{box-sizing:border-box;max-width:${d.w}mm;margin:24px auto;padding:${d.m.t}mm ${d.m.r}mm ${d.m.b}mm ${d.m.l}mm;background:#fff;white-space:pre-wrap;overflow-wrap:break-word}.doc .page-break::after{display:none}@media print{body{background:none}.doc{margin:0;padding:0;max-width:none}}\n${stylesMod.css()}\n${pageCss()}</style></head><body><div class="doc"${doc.theme !== 'modern' ? ` data-theme="${doc.theme}"` : ''}${dataAttrs()}>${editor.innerHTML}</div></body></html>`;
+  const html = `<!doctype html>\n<html lang="${editor.lang}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="generator" content="Inkwell"><title>${esc(doc.title)}</title><style>${css}\nbody{margin:0;background:#f1f1ee}.doc{box-sizing:border-box;max-width:${d.w}mm;margin:24px auto;padding:${d.m.t}mm ${d.m.r}mm ${d.m.b}mm ${d.m.l}mm;background:#fff;white-space:pre-wrap;overflow-wrap:break-word}.doc .page-break::after{display:none}@media print{body{background:none}.doc{margin:0;padding:0;max-width:none}}\n${stylesMod.css()}\n${pageCss()}</style></head><body><div class="doc"${doc.theme !== 'modern' ? ` data-theme="${doc.theme}"` : ''}${dataAttrs()}>${noGaps(editor.innerHTML)}</div></body></html>`;
   return new Blob([html], { type: 'text/html' });
 }
 async function saveHtml() { download(await buildHtml(), fileBase() + '.html'); }

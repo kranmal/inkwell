@@ -107,6 +107,21 @@ export function firstPageCss() {
   return ` @page :first { ${['top', 'bottom'].flatMap((zn) => ALIGNS.map((a) => `@${zn}-${a} { content: none; }`)).join(' ')} }`;
 }
 
+const SPLIT_TAGS = new Set(['P', 'LI', 'BLOCKQUOTE']);
+const BLOCKY = 'p,ul,ol,li,table,div,figure,blockquote,pre,h1,h2,h3,h4,h5,h6';
+const splittable = (el) => SPLIT_TAGS.has(el.tagName) && !el.querySelector(BLOCKY) && el.textContent.trim().length > 40;
+const idx = (el) => Array.prototype.indexOf.call(el.parentNode.children, el) + 1;
+
+// Removes the in-text gaps that layout() inserted, so saved/undo/exported HTML never contains them.
+export function strip() {
+  if (!api) return;
+  const gs = api.editor.querySelectorAll('.pg-gap');
+  if (!gs.length) return;
+  const ps = new Set();
+  gs.forEach((g) => { ps.add(g.parentNode); g.remove(); });
+  ps.forEach((q) => q.normalize());
+}
+
 function units(ed) {
   const out = [];
   let i = 0, forced = false;
@@ -115,14 +130,75 @@ function units(ed) {
     if (el.classList.contains('page-break')) { out.push({ el, brk: true }); forced = true; continue; }
     if ((el.tagName === 'UL' || el.tagName === 'OL') && el.children.length) {
       let j = 0;
-      for (const li of el.children) { j++; out.push({ el: li, sel: `#editor > :nth-child(${i}) > :nth-child(${j})`, forced }); forced = false; }
-    } else { out.push({ el, sel: `#editor > :nth-child(${i})`, forced }); forced = false; }
+      for (const li of el.children) { j++; out.push({ el: li, sel: `#editor > :nth-child(${i}) > :nth-child(${j})`, forced, split: splittable(li) }); forced = false; }
+    } else if (el.tagName === 'TABLE' && el.rows.length > 1) {
+      const tsel = `#editor > :nth-child(${i})`;
+      for (const tr of el.rows) {
+        out.push({ el: tr, row: true, tsel, sel: `${tsel} > :nth-child(${idx(tr.parentNode)}) > :nth-child(${idx(tr)})`, forced });
+        forced = false;
+      }
+    } else { out.push({ el, sel: `#editor > :nth-child(${i})`, forced, split: splittable(el) }); forced = false; }
   }
   return out;
 }
 
+// Text positions of el, in order, so a line can be found by binary search.
+function textNodes(el) {
+  const out = [];
+  const w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, { acceptNode: (n) => (n.parentElement.closest('[contenteditable="false"]') || !n.nodeValue.length) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT });
+  let n, total = 0;
+  while ((n = w.nextNode())) { out.push({ n, from: total }); total += n.nodeValue.length; }
+  return { nodes: out, total };
+}
+function at(tx, i) {
+  let lo = 0, hi = tx.nodes.length - 1;
+  while (lo < hi) { const m = (lo + hi + 1) >> 1; if (tx.nodes[m].from <= i) lo = m; else hi = m - 1; }
+  const e = tx.nodes[lo];
+  return { n: e.n, o: Math.min(e.n.nodeValue.length, i - e.from) };
+}
+function rectAt(tx, i) {
+  for (let j = i; j < Math.min(tx.total, i + 40); j++) {
+    const a = at(tx, j);
+    if (a.o >= a.n.nodeValue.length) continue;
+    const r = document.createRange();
+    r.setStart(a.n, a.o); r.setEnd(a.n, a.o + 1);
+    const rs = r.getClientRects();
+    if (rs.length) { const q = rs[rs.length - 1]; if (q.height) return { top: q.top, bottom: q.bottom }; }
+  }
+  return null;
+}
+// First line of el whose bottom passes yLimit (client px). Returns where that line starts, never at or before char `after`.
+function lineSplit(el, yLimit, after) {
+  const tx = textNodes(el);
+  if (!tx.total) return null;
+  let lo = Math.max(0, after + 1), hi = tx.total - 1, found = -1;
+  while (lo <= hi) {
+    const m = (lo + hi) >> 1;
+    const r = rectAt(tx, m);
+    if (r && r.bottom > yLimit) { found = m; hi = m - 1; } else lo = m + 1;
+  }
+  if (found < 0) return null;
+  const ref = rectAt(tx, found);
+  if (!ref) return null;
+  const tol = Math.max(2, (ref.bottom - ref.top) * 0.5);
+  lo = Math.max(0, after + 1); hi = found;
+  let first = found;
+  while (lo <= hi) {
+    const m = (lo + hi) >> 1;
+    const r = rectAt(tx, m);
+    if (r && r.top > ref.top - tol) { first = m; hi = m - 1; } else lo = m + 1;
+  }
+  if (first <= after || first <= 0) return null;
+  const rr = rectAt(tx, first) || ref;
+  const a = at(tx, first);
+  const range = document.createRange();
+  range.setStart(a.n, a.o); range.collapse(true);
+  return { idx: first, top: rr.top, range, lh: rr.bottom - rr.top };
+}
+
 export function layout() {
   if (!api || !api.doc || !sheets) return;
+  strip();
   const { page, editor, MM } = api;
   const d = api.pageDims();
   H = d.h * MM;
@@ -146,22 +222,68 @@ export function layout() {
     const r = u.el.getBoundingClientRect();
     u.t = (r.top - pr.top) / sc; u.b = (r.bottom - pr.top) / sc;
   }
-  let S = 0, k = 0, prevB = mt, css = '', pend = null;
+  let S = 0, k = 0, prevB = mt, css = '', pend = null, carry = 0, tblS0 = 0, curT = null;
+  const cuts = [];
   secs = [];
+  const CT = () => k * P + mt, CB = () => k * P + H - mb;
   for (const u of us) {
     if (u.brk && u.el.classList.contains('sect-break')) pend = parseSect(u.el);
+    if (u.row) { if (u.tsel !== curT) { curT = u.tsel; tblS0 = S; } } else if (curT) { carry = S - tblS0; curT = null; }
     const g = Math.max(0, u.t - prevB);
-    const t = u.t + S;
-    let b = u.b + S;
-    const CT = k * P + mt, CB = k * P + H - mb;
-    if (!u.brk && (u.forced || (b > CB + 0.5 && t > CT + 1))) {
-      const delta = (k + 1) * P + mt - t;
-      if (delta > 0) { css += `${u.sel}{margin-top:${(g + delta).toFixed(2)}px !important}`; S += delta; b += delta; }
-      k++;
-      if (pend) { secs.push({ ...pend, page: k }); pend = null; }
+    let add = u.row ? 0 : carry;
+    if (!u.row) carry = 0;
+    let moved = 0;
+    const tNow = () => u.t + S, bNow = () => u.b + S;
+    const pushWhole = () => {
+      const delta = (k + 1) * P + mt - tNow();
+      if (delta > 0) {
+        if (u.row) { S += delta; } else { moved += delta; S += delta; }
+        k++;
+        if (pend) { secs.push({ ...pend, page: k }); pend = null; }
+      }
+    };
+    const trySplit = () => {
+      const lhPx = parseFloat(getComputedStyle(u.el).lineHeight) / sc;
+      const lh = (lhPx > 0 ? lhPx : (parseFloat(getComputedStyle(u.el).fontSize) / sc) * 1.3) * sc;
+      let did = 0, pieceTop = u.t, last = -1;
+      while (bNow() > CB() + 0.5) {
+        const lim = pr.top + (CB() - S) * sc;
+        let cut = lineSplit(u.el, lim, last);
+        if (!cut) break;
+        const px = (c) => (c.top - pr.top) / sc;
+        if ((u.b - px(cut)) * sc < 1.5 * lh) {
+          const c2 = lineSplit(u.el, cut.top - 1, last);
+          if (!c2) break;
+          cut = c2;
+        }
+        const cutNat = px(cut);
+        if ((cutNat - pieceTop) * sc < 1.5 * lh) break;
+        const gap = (k + 1) * P + mt - (cutNat + S);
+        if (gap <= 0) break;
+        cuts.push({ range: cut.range, gap });
+        S += gap; k++; did++; pieceTop = cutNat; last = cut.idx;
+        if (pend) { secs.push({ ...pend, page: k }); pend = null; }
+      }
+      return did;
+    };
+    if (!u.brk) {
+      let did = 0;
+      if (u.forced) pushWhole();
+      else if (u.split && bNow() > CB() + 0.5 && tNow() < CB() - 2 * (parseFloat(getComputedStyle(u.el).lineHeight) / sc || 18)) did = trySplit();
+      if (!did && !u.forced && bNow() > CB() + 0.5 && tNow() > CT() + 1) pushWhole();
+      if (u.split && bNow() > CB() + 0.5) trySplit();
     }
-    k = Math.max(k, Math.floor((b - 1) / P));
+    if (u.row) {
+      const off = S - tblS0;
+      if (off > 0) css += `${u.sel}{position:relative;top:${off.toFixed(2)}px}`;
+    } else if (moved + add > 0) css += `${u.sel}{margin-top:${(g + moved + add).toFixed(2)}px !important}`;
+    k = Math.max(k, Math.floor((bNow() - 1) / P));
     prevB = u.b;
+  }
+  for (const c of cuts.reverse()) {
+    const sp = document.createElement('span');
+    sp.className = 'pg-gap'; sp.contentEditable = 'false'; sp.style.height = c.gap.toFixed(2) + 'px';
+    c.range.insertNode(sp);
   }
   n = k + 1;
   rules.textContent = css;
