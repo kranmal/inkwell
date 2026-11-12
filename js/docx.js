@@ -251,6 +251,19 @@ export async function exportDocx(root, { title = 'Document', page, hf = null, st
       notes[kind].push(li);
       return `<w:r><w:rPr><w:vertAlign w:val="superscript"/></w:rPr><w:${kind === 'fn' ? 'footnote' : 'endnote'}Reference w:id="${notes[kind].length}"/></w:r>`;
     }
+    if (t === 'SPAN' && cl.contains('fc') && !plain) {
+      // Tracked formatting: the runs carry the new look; w:rPrChange holds what they looked like before.
+      const tmp = document.createElement('div');
+      tmp.innerHTML = node.dataset.was || '';
+      let n = tmp, f0 = f;
+      while (n.firstChild) { n = n.firstChild; }
+      const chain = [];
+      for (let e = n.nodeType === 1 ? n : n.parentNode; e && e !== tmp; e = e.parentNode) chain.unshift(e);
+      for (const e of chain) f0 = fmt(e, f0);
+      const old = rPr(f0).replace(/^<w:rPr>|<\/w:rPr>$/g, '');
+      const change = () => `<w:rPrChange w:id="${++annId}" w:author="${who(node)}" w:date="${iso(node.dataset.time)}"><w:rPr>${old}</w:rPr></w:rPrChange>`;
+      return kids(node, f).replace(/<w:r>(?:<w:rPr>(.*?)<\/w:rPr>)?/g, (m, inner) => `<w:r><w:rPr>${inner || ''}${change()}</w:rPr>`);
+    }
     if (cl.contains('tc') && (t === 'INS' || t === 'DEL') && !plain) {
       const tag = t === 'INS' ? 'ins' : 'del';
       const runs = kids(node, t === 'DEL' ? { ...f, del: true } : f);
