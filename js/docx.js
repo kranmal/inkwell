@@ -54,7 +54,7 @@ function fontName(stack, fallback) {
 const BLOCKS = new Set(['P', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'BLOCKQUOTE', 'PRE', 'DIV', 'UL', 'OL', 'TABLE', 'HR', 'FIGURE', 'SECTION', 'ARTICLE', 'LI']);
 const hasBlockChild = (el) => [...el.children].some((c) => BLOCKS.has(c.tagName));
 
-async function prepareImages(root, maxPx) {
+async function prepareImages(root, maxPx, maxH = Infinity) {
   const map = new Map();
   let n = 0;
   for (const img of root.querySelectorAll('img')) {
@@ -80,7 +80,7 @@ async function prepareImages(root, maxPx) {
       }
       let w = parseFloat(img.style.width) || parseFloat(img.getAttribute('width')) || nw;
       if (/%$/.test(img.style.width)) w = (maxPx * parseFloat(img.style.width)) / 100;
-      w = Math.min(w, maxPx);
+      w = Math.min(w, maxPx, (maxH * nw) / nh);
       map.set(img, { bytes, ext, w, h: (w * nh) / nw, n: ++n });
     } catch { /* cross-origin or broken image: leave it out */ }
   }
@@ -91,7 +91,7 @@ async function prepareImages(root, maxPx) {
     try {
       const d = await toPng(el);
       if (!d) continue;
-      const w = Math.min(d.w, maxPx);
+      const w = Math.min(d.w, maxPx, (maxH * d.w) / d.h);
       map.set(el, { bytes: d.bytes, ext: 'png', w, h: (w * d.h) / d.w, n: ++n });
     } catch { /* leave it out */ }
   }
@@ -99,7 +99,7 @@ async function prepareImages(root, maxPx) {
     try {
       const d = await smartPng(el);
       if (!d || !d.bytes) continue;
-      const w = Math.min(d.w, maxPx);
+      const w = Math.min(d.w, maxPx, (maxH * d.w) / d.h);
       map.set(el, { bytes: d.bytes, ext: 'png', w, h: (w * d.h) / d.w, n: ++n });
     } catch { /* leave it out */ }
   }
@@ -110,7 +110,7 @@ export async function exportDocx(root, { title = 'Document', page, hf = null, st
   const JSZip = await loadScript('vendor/jszip.min.js', 'JSZip');
   const contentMm = page.w - page.m.l - page.m.r;
   const contentTw = Math.round(contentMm * TW_MM);
-  const images = await prepareImages(root, (contentMm / 25.4) * 96);
+  const images = await prepareImages(root, (contentMm / 25.4) * 96, ((page.h - page.m.t - page.m.b - 2) / 25.4) * 96);
 
   const rels = [];
   const nums = [];              // each entry: abstract id (1 bullets, 2 numbers)

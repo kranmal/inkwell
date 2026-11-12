@@ -326,8 +326,13 @@ export function layout() {
       wr += `#editor>:nth-child(${i + 1}){${cw > natural + 0.5 ? `width:${cw}px` : `max-width:${cw}px`} !important;box-sizing:border-box;position:relative;left:${off.toFixed(2)}px}${el.tagName === 'TABLE' ? `#editor>:nth-child(${i + 1}){width:${cw}px !important}` : ''}`;
     });
   }
+  // A picture can never be taller than the smallest page body in the document, so it always fits on a page (object-fit keeps its shape).
+  let capH = H - mt - mb;
+  if (cols === 1) kids.forEach((_, i) => { capH = Math.min(capH, dimsFor(landOf[i]).h * MM - (mOf[i].t + mOf[i].b) * MM); });
+  const imgCap = `#editor img{max-height:${Math.max(40, capH - 2).toFixed(1)}px;object-fit:contain}`;
+  wr += imgCap;
   // in column mode every block is narrowed to one column while measuring; the blocks are then slid into place
-  rules.textContent = cols > 1 ? `#editor>*{max-width:${colW}px !important;box-sizing:border-box}#editor>table{width:${colW}px !important}` : wr;
+  rules.textContent = cols > 1 ? `#editor>*{max-width:${colW}px !important;box-sizing:border-box}#editor>table{width:${colW}px !important}` + imgCap : wr;
   paged = true;
   P = H + GAP;
   const pr = page.getBoundingClientRect();
@@ -404,7 +409,7 @@ export function layout() {
     drawHf(d, false);
     return;
   }
-  let S = 0, k = 0, prevB = mt, css = '', pend = null, carry = 0, tblS0 = 0, curT = null;
+  let S = 0, k = 0, prevB = mt, css = '', pend = null, carry = 0, tblS0 = 0, curT = null, tblR = 0;
   const newPage = (i, L, m) => { const dm = dimsFor(L), prev = pgs[i - 1]; return { top: prev ? prev.top + prev.h + GAP : 0, h: dm.h * MM, w: dm.w * MM, land: L, m }; };
   pgs = [newPage(0, us.length ? us[0].land : baseLand, us.length ? us[0].m : d.m)];
   const cuts = [];
@@ -413,7 +418,7 @@ export function layout() {
   const nextTop = () => pgs[k].top + pgs[k].h + GAP;
   for (const u of us) {
     if (u.brk && u.el.classList.contains('sect-break')) pend = parseSect(u.el);
-    if (u.row) { if (u.tsel !== curT) { curT = u.tsel; tblS0 = S; } } else if (curT) { carry = S - tblS0; curT = null; }
+    if (u.row) { if (u.tsel !== curT) { curT = u.tsel; tblS0 = S; tblR = 0; } } else if (curT) { carry = S - tblS0 - tblR; curT = null; tblR = 0; }
     const g = Math.max(0, u.t - prevB);
     let add = u.row ? 0 : carry;
     if (!u.row) carry = 0;
@@ -453,7 +458,46 @@ export function layout() {
       }
       return did;
     };
-    if (!u.brk) {
+    // A row taller than a whole page body can't be moved anywhere that fits: cut each cell at line boundaries and continue it on the next page.
+    const cellsOf = () => [...u.el.cells].filter((c) => c.textContent.trim().length && !c.querySelector('img,table'));
+    const splitRow = () => {
+      const cells = cellsOf();
+      if (!cells.length) return 0;
+      const hs = new Map(cells.map((c) => [c, c.getBoundingClientRect().height]));
+      const primary = cells.reduce((a, b) => (hs.get(b) > hs.get(a) ? b : a));
+      const lastOf = new Map();
+      const px = (c) => (c.top - pr.top) / sc;
+      let did = 0, guard = 0;
+      while (bNow() > CB() + 0.5 && guard++ < 200) {
+        const lim = pr.top + (CB() - S) * sc;
+        let gP = 0, gMax = 0, any = 0;
+        for (const c of cells) {
+          const cut = lineSplit(c, lim, lastOf.has(c) ? lastOf.get(c) : -1);
+          if (!cut) continue;
+          const gap = nextTop() + umt - (px(cut) + S);
+          if (gap <= 0) continue;
+          cuts.push({ range: cut.range, gap });
+          lastOf.set(c, cut.idx); any++;
+          if (c === primary) gP = gap;
+          gMax = Math.max(gMax, gap);
+        }
+        if (!any) break;
+        const inc = gP || gMax;
+        S += inc; tblRNow += inc; go(); did++;
+        if (pend) { secs.push({ ...pend, page: k }); pend = null; }
+      }
+      return did;
+    };
+    let tblRNow = tblR;
+    let rowSplit = 0;
+    if (!u.brk && u.row && !u.forced && (u.b - u.t) > (CB() - CT()) && cellsOf().length) {
+      // tall row: start in place when there is room for a few lines, else on a fresh page
+      if (tNow() > CB() - 3 * 18) pushWhole();
+      const off0 = S - tblS0 - tblR;
+      rowSplit = splitRow();
+      if (rowSplit) { if (off0 > 0) css += `${u.sel}{position:relative;top:${off0.toFixed(2)}px}`; tblR = tblRNow; }
+    }
+    if (!u.brk && !rowSplit) {
       let did = 0;
       if (u.forced) pushWhole();
       else if (u.split && bNow() > CB() + 0.5 && tNow() < CB() - 2 * (parseFloat(getComputedStyle(u.el).lineHeight) / sc || 18)) did = trySplit();
@@ -461,8 +505,7 @@ export function layout() {
       if (u.split && bNow() > CB() + 0.5) trySplit();
     }
     if (u.row) {
-      const off = S - tblS0;
-      if (off > 0) css += `${u.sel}{position:relative;top:${off.toFixed(2)}px}`;
+      if (!rowSplit) { const off = S - tblS0 - tblR; if (off > 0) css += `${u.sel}{position:relative;top:${off.toFixed(2)}px}`; }
     } else if (moved + add > 0) css += `${u.sel}{margin-top:${(g + moved + add).toFixed(2)}px !important}`;
     while (bNow() - 1 >= nextTop()) go();
     prevB = u.b;

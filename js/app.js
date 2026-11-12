@@ -8,11 +8,11 @@ import { prepare as prepareDocx } from './docximport.js';
 import * as pagesMod from './pages.js';
 // layout() adds empty .pg-gap spacers and (in columns) .pg-part wrappers; neither belongs in saved, undo or exported HTML
 const noGaps = (h) => {
-  h = h.replace(/<span class="pg-gap"[^>]*><\/span>/g, '');
-  if (!h.includes('pg-part')) return h;
+  h = h.replace(/<span class="pgs?-gap"[^>]*><\/span>/g, '');
+  if (!h.includes("pg-part") && !h.includes("pgs-part")) return h;
   const t = document.createElement('template');
   t.innerHTML = h;
-  t.content.querySelectorAll('.pg-part').forEach((w) => w.replaceWith(...w.childNodes));
+  t.content.querySelectorAll('.pg-part,.pgs-part').forEach((w) => w.replaceWith(...w.childNodes));
   return t.innerHTML;
 };
 import * as tablesMod from './tables.js';
