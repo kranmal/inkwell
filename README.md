@@ -35,9 +35,10 @@ A word processor that runs entirely in the browser. Live at https://kranmal.gith
 - Mail merge does its own CSV parsing; there is no Excel file import.
 - Equation input is a LaTeX-style subset, not the full language.
 - Pages: long paragraphs and list items split across pages at a line boundary (at least two lines stay on each side), and tables break between rows. Pictures, shapes and a single row taller than a page still move whole. Repeated table header rows show on continuation pages in print/PDF and Word, not on screen. In multi-column documents text fills the left column, then the right, then the next page. Each paragraph, list item or table row stays whole in one column (a block taller than a column keeps its place and overflows), so column bottoms are ragged. Print and the HTML export use true CSS columns.
-- Track changes records text you type, delete or paste. Formatting changes are not tracked.
-- Grammar checking is pattern-based, so it catches common mistakes rather than everything.
-- Charts take up to 8 series. In Word export, charts and shapes become pictures and a text box becomes a one-cell table.
+- Track changes records text you type, delete or paste, and formatting changes (bold, italic, underline, strike, sub/superscript, font, size, colour, highlight), which you can accept or reject. A formatting change in Word export appears as plain formatting, not a Word formatting revision.
+- Grammar checking is pattern-based (about 100 rules, including comma splices, long sentences and commonly confused words), so it catches common mistakes rather than everything.
+- Charts come in seven types (column, stacked column, bar, line, area, pie, doughnut) with up to 12 series. In Word export, charts become native Word charts with an embedded workbook, and shapes and text boxes become Word drawing objects; SmartArt is still a picture.
+- Word import (.docx) keeps text, styles, tables, pictures, footnotes, endnotes, comments, tracked changes and the main header and footer. Per-section headers, first-page headers and text boxes are not imported.
 - Word export writes headers, footers, footnotes, endnotes, comments, tracked changes and custom styles. Equations (OMML), section breaks with their own headers, repeated header rows and the protection flag are included, with SmartArt as a picture. Its XML is checked for well-formedness, but the output has not yet been opened in Microsoft Word itself.
 
 ## Run locally
