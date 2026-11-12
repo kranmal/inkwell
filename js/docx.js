@@ -498,13 +498,14 @@ export async function exportDocx(root, { title = 'Document', page, hf = null, st
   const RT = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/';
   // One entry per section: the first runs up to the first section break, and each break starts the next.
   const emptyPart = (tag) => `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:${tag} ${NS}><w:p/></w:${tag}>`;
-  const secDefs = [{ H, landscape: !!page.landscape, restart: null }];
+  const secDefs = [{ H, landscape: !!page.landscape, restart: null, m: page.m }];
   for (const d of breaks) {
     const prev = secDefs[secDefs.length - 1];
     const eff = { ...prev.H };
     if (d.header !== undefined) eff.header = d.header;
     if (d.footer !== undefined) eff.footer = d.footer;
-    secDefs.push({ H: eff, landscape: d.landscape === undefined ? prev.landscape : !!d.landscape, restart: d.restart != null && d.restart !== '' ? Number(d.restart) : null });
+    const pm = d.margins && page.presets && page.presets[d.margins];
+    secDefs.push({ H: eff, m: pm ? { t: pm[0], r: pm[1], b: pm[2], l: pm[3] } : prev.m, landscape: d.landscape === undefined ? prev.landscape : !!d.landscape, restart: d.restart != null && d.restart !== '' ? Number(d.restart) : null });
   }
   for (const sd of secDefs) { sd.hx = zone('header', sd.H); sd.fx = zone('footer', sd.H); }
   const anyHdr = secDefs.some((sd) => sd.hx), anyFtr = secDefs.some((sd) => sd.fx);
@@ -526,7 +527,7 @@ export async function exportDocx(root, { title = 'Document', page, hf = null, st
     if (anyFtr) refs += `<w:footerReference w:type="default" r:id="${partRel('footer', sd.fx || emptyPart('ftr'))}"/>`;
     const [pw, ph] = sd.landscape ? [longSide, shortSide] : [shortSide, longSide];
     const cols = page.cols || 1;
-    return `<w:sectPr>${refs}<w:type w:val="nextPage"/><w:pgSz w:w="${tw(pw)}" w:h="${tw(ph)}"${sd.landscape ? ' w:orient="landscape"' : ''}/><w:pgMar w:top="${tw(page.m.t)}" w:right="${tw(page.m.r)}" w:bottom="${tw(page.m.b)}" w:left="${tw(page.m.l)}" w:header="708" w:footer="708" w:gutter="0"/>${sd.restart != null ? `<w:pgNumType w:start="${sd.restart}"/>` : ''}<w:cols w:num="${cols}" w:space="708"/>${first && H.firstDiff && refs ? '<w:titlePg/>' : ''}</w:sectPr>`;
+    return `<w:sectPr>${refs}<w:type w:val="nextPage"/><w:pgSz w:w="${tw(pw)}" w:h="${tw(ph)}"${sd.landscape ? ' w:orient="landscape"' : ''}/><w:pgMar w:top="${tw(sd.m.t)}" w:right="${tw(sd.m.r)}" w:bottom="${tw(sd.m.b)}" w:left="${tw(sd.m.l)}" w:header="708" w:footer="708" w:gutter="0"/>${sd.restart != null ? `<w:pgNumType w:start="${sd.restart}"/>` : ''}<w:cols w:num="${cols}" w:space="708"/>${first && H.firstDiff && refs ? '<w:titlePg/>' : ''}</w:sectPr>`;
   };
   let bodyXml = body;
   breaks.forEach((d, i) => { bodyXml = bodyXml.replace(`%%SB${i}%%`, sectPr(secDefs[i], i === 0)); });

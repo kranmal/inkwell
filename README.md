@@ -17,7 +17,7 @@ A word processor that runs entirely in the browser. Live at https://kranmal.gith
 - **References:** figure/table/equation captions, cross-references, an index built from marked entries, citations with a bibliography (APA, MLA, IEEE)
 - **Mailings:** mail merge from pasted CSV or spreadsheet data, or from a CSV, JSON or Excel file, with live preview and one-document-per-record printing
 - **Equations** (type `\frac{a}{b}`, `\sqrt{x}`, `x^2` and so on; saved as real Word equations), **WordArt** and **SmartArt** (process, cycle, hierarchy, list, pyramid)
-- **Sections** with their own header, footer, page-number restart and orientation
+- **Sections** with their own header, footer, page-number restart, orientation and margins
 - **Tables:** sort, repeat header rows, and formulas such as `=SUM(ABOVE)`
 - **Templates** gallery, **version history**, **macros** (record typing and formatting, replay), a **thesaurus** and **translation**, **dictation**, and **document protection**
 - Documents autosave in your browser (IndexedDB). Nothing is uploaded.
@@ -28,7 +28,7 @@ A word processor that runs entirely in the browser. Live at https://kranmal.gith
 
 ## Known limits
 
-- Sections: a section can switch to landscape or back, and each page is drawn at its own size on screen (centred, with its own header and footer) in single-column documents. In multi-column documents every page on screen keeps one size, and the section break says what changes. Margins are the same in every section. Orientation and per-section margins are written to .docx and print.
+- Sections: a section can switch orientation and margins (Normal, Narrow, Moderate, Wide) from its break onward, and each page is drawn at its own size and margins on screen (centred, with its own header and footer) in single-column documents. In multi-column documents every page on screen keeps one size and one set of margins, and the section break says what changes. Both are written to .docx and print. Importing a .docx keeps a section's margins only when they match one of the four presets; the document's first section keeps the document margins you have set.
 - Document protection is a deterrent that stops editing in Inkwell and sets read-only in the .docx. It is not encryption, and anyone can open the file in another editor.
 - Dictation and translation rely on the browser (speech recognition, and the on-device Translator API). They are unavailable in browsers without them. The thesaurus is a built-in list of about 1,000 words.
 - Version history keeps the latest snapshots in this browser only. Macros record typing and formatting, not mouse selections.

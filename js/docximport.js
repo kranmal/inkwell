@@ -73,6 +73,8 @@ async function sectInfo(zip, docXml) {
     }
     const sz = kids(sect, 'pgSz')[0];
     o.landscape = !!sz && (attr(sz, 'orient') === 'landscape' || Number(attr(sz, 'w')) > Number(attr(sz, 'h')));
+    const pm = kids(sect, 'pgMar')[0];
+    if (pm) { const mm = (k) => Number(attr(pm, k)) / 56.69; o.m = [mm('top'), mm('right'), mm('bottom'), mm('left')]; }
     const pn = kids(sect, 'pgNumType')[0];
     if (pn && attr(pn, 'start') !== '') o.restart = parseInt(attr(pn, 'start'), 10);
     out.push(o);
@@ -84,11 +86,14 @@ async function sectInfo(zip, docXml) {
 }
 
 // What a section break should carry: the settings of the section that starts after it, where they differ.
+const PRESETS = { normal: [25.4, 25.4, 25.4, 25.4], narrow: [12.7, 12.7, 12.7, 12.7], moderate: [25.4, 19.1, 25.4, 19.1], wide: [25.4, 50.8, 25.4, 50.8] };
 function sectData(prev, next) {
   const d = {};
   if (next.header && next.header !== prev.header) d.header = next.header;
   if (next.footer && next.footer !== prev.footer) d.footer = next.footer;
   d.landscape = !!next.landscape;
+  const name = next.m && Object.keys(PRESETS).find((k) => PRESETS[k].every((v, i) => Math.abs(v - next.m[i]) < 1.5));
+  if (name) d.margins = name;
   if (next.restart != null && !isNaN(next.restart)) d.restart = next.restart;
   return d;
 }

@@ -78,6 +78,7 @@ export function sectionCss() {
   if (!kids.some((el) => el.classList.contains('sect-break'))) return '';
   const base = hf(), d = api.pageDims();
   let css = '', cur = { ...base }, name = 0, rules2 = '';
+  let curLand = !!d.landscape, curM = [d.m.t, d.m.r, d.m.b, d.m.l];
   const fam = getComputedStyle(ed).fontFamily;
   let prevHeader = base.header, prevFooter = base.footer;
   kids.forEach((el, idx) => {
@@ -92,8 +93,10 @@ export function sectionCss() {
         const content = parts.map((p) => typeof p === 'string' ? q(p) : (cur.numFormat === 'page' ? '"Page " counter(page)' : cur.numFormat === 'of' ? '"Page " counter(page) " of " counter(pages)' : 'counter(page)')).join(' ');
         return `@${zn}-${a} { content: ${content}; font: 9pt ${fam}; color: #6b6b6b; }`;
       })).join(' ');
-      const size = s.landscape ? `${d.h}mm ${d.w}mm` : `${d.w}mm ${d.h}mm`;
-      css += `@page sec${name} { size: ${size}; ${boxes} } `;
+      if (s.landscape !== undefined) curLand = !!s.landscape;
+      if (s.margins && d.presets[s.margins]) curM = d.presets[s.margins];
+      const size = curLand === !!d.landscape ? `${d.w}mm ${d.h}mm` : `${d.h}mm ${d.w}mm`;
+      css += `@page sec${name} { size: ${size}; margin: ${curM[0]}mm ${curM[1]}mm ${curM[2]}mm ${curM[3]}mm; ${boxes} } `;
       rules2 += `#editor > :nth-child(${idx + 2}) { page: sec${name}; ${s.restart != null && s.restart !== '' ? `counter-reset: page ${Number(s.restart)};` : ''} } `;
       // every following block (until the next section break) shares the named page
       for (let j = idx + 2; j < kids.length; j++) {
@@ -178,23 +181,23 @@ function shiftAfter(el, range, dx, dy) {
   }
 }
 
-function units(ed, landOf) {
+function units(ed, landOf, mOf) {
   const out = [];
   let i = 0, forced = false;
   for (const el of ed.children) {
     i++;
-    const land = landOf[i - 1];
-    if (el.classList.contains('page-break')) { out.push({ el, land, brk: true, sel: `#editor > :nth-child(${i})` }); forced = true; continue; }
+    const land = landOf[i - 1], m = mOf[i - 1];
+    if (el.classList.contains('page-break')) { out.push({ el, land, m, brk: true, sel: `#editor > :nth-child(${i})` }); forced = true; continue; }
     if ((el.tagName === 'UL' || el.tagName === 'OL') && el.children.length) {
       let j = 0;
-      for (const li of el.children) { j++; out.push({ el: li, land, sel: `#editor > :nth-child(${i}) > :nth-child(${j})`, forced, split: splittable(li) }); forced = false; }
+      for (const li of el.children) { j++; out.push({ el: li, land, m, sel: `#editor > :nth-child(${i}) > :nth-child(${j})`, forced, split: splittable(li) }); forced = false; }
     } else if (el.tagName === 'TABLE' && el.rows.length > 1) {
       const tsel = `#editor > :nth-child(${i})`;
       for (const tr of el.rows) {
-        out.push({ el: tr, land, row: true, tsel, sel: `${tsel} > :nth-child(${idx(tr.parentNode)}) > :nth-child(${idx(tr)})`, forced });
+        out.push({ el: tr, land, m, row: true, tsel, sel: `${tsel} > :nth-child(${idx(tr.parentNode)}) > :nth-child(${idx(tr)})`, forced });
         forced = false;
       }
-    } else { out.push({ el, land, sel: `#editor > :nth-child(${i})`, forced, split: splittable(el) }); forced = false; }
+    } else { out.push({ el, land, m, sel: `#editor > :nth-child(${i})`, forced, split: splittable(el) }); forced = false; }
   }
   return out;
 }
@@ -253,13 +256,40 @@ function lineSplit(el, yLimit, after) {
   return { idx: first, top: rr.top, range, lh: rr.bottom - rr.top };
 }
 
+// Orientation and margins in force for each top-level block: a section break changes them from there on.
+function flowOf() {
+  const d = api.pageDims(), kids = [...api.editor.children], land = [], mar = [];
+  let L = !!d.landscape, M = { ...d.m };
+  for (const el of kids) {
+    land.push(L); mar.push(M);
+    if (el.classList.contains('sect-break')) {
+      const sc = parseSect(el);
+      if (sc.landscape !== undefined) L = !!sc.landscape;
+      const pm = sc.margins && d.presets[sc.margins];
+      if (pm) M = { t: pm[0], r: pm[1], b: pm[2], l: pm[3] };
+    }
+  }
+  return { kids, land, mar, d };
+}
+export function pageWidthMm() { return pageWmm || api.pageDims().w; }
+export function marginsAtCaret() {
+  const { kids, land, mar, d } = flowOf();
+  const sel = getSelection();
+  let i = 0;
+  if (sel && sel.anchorNode) { const k = kids.findIndex((el) => el.contains(sel.anchorNode)); if (k >= 0) i = k; }
+  const L = land[i] === undefined ? !!d.landscape : land[i];
+  return { w: L === !!d.landscape ? d.w : d.h, m: mar[i] || d.m };
+}
+
 // On screen every sheet keeps one size, so a section's orientation can't be drawn; say so on the break itself.
 function labelBreaks() {
   let css = '', land = !!api.pageDims().landscape;
+  const multi = api.pageDims().cols > 1;
   [...api.editor.children].forEach((el, i) => {
     if (!el.classList.contains('sect-break')) return;
     const s = parseSect(el), bits = [];
-    if (s.landscape !== undefined && !!s.landscape !== land) { land = !!s.landscape; if (api.pageDims().cols > 1) bits.push(land ? 'landscape from here' : 'portrait from here'); }
+    if (s.landscape !== undefined && !!s.landscape !== land) { land = !!s.landscape; if (multi) bits.push(land ? 'landscape from here' : 'portrait from here'); }
+    if (s.margins && multi) bits.push(`${s.margins} margins`);
     if (s.header !== undefined) bits.push('own header');
     if (s.footer !== undefined) bits.push('own footer');
     if (s.restart != null && s.restart !== '') bits.push(`page numbers restart at ${s.restart}`);
@@ -282,21 +312,18 @@ export function layout() {
   // Orientation per block: a section break can switch landscape on or off from there on. Drawn on screen for single-column documents.
   const baseLand = !!d.landscape;
   const dimsFor = (L) => (L === baseLand ? { w: d.w, h: d.h } : { w: d.h, h: d.w });
-  const kids = [...editor.children], landOf = [];
-  let curL = baseLand;
-  for (const el of kids) {
-    landOf.push(curL);
-    if (el.classList.contains('sect-break')) { const sc0 = parseSect(el); if (sc0.landscape !== undefined) curL = !!sc0.landscape; }
-  }
-  const mixed = cols === 1 && landOf.some((l) => l !== baseLand);
+  const { kids, land: landOf, mar: mOf } = flowOf();
+  const sameM = (m) => m.t === d.m.t && m.r === d.m.r && m.b === d.m.b && m.l === d.m.l;
+  const mixed = cols === 1 && (landOf.some((l) => l !== baseLand) || mOf.some((m) => !sameM(m)));
   const Wmm = mixed ? Math.max(d.w, d.h) : d.w;
   pageWmm = Wmm;
   page.style.setProperty('--page-w', Wmm + 'mm');
   let wr = '';
   if (mixed) {
     kids.forEach((el, i) => {
-      const w = dimsFor(landOf[i]).w, cw = (w - d.m.l - d.m.r) * MM, off = ((Wmm - w) / 2) * MM;
-      wr += `#editor>:nth-child(${i + 1}){max-width:${cw}px !important;box-sizing:border-box;position:relative;left:${off.toFixed(2)}px}${el.tagName === 'TABLE' ? `#editor>:nth-child(${i + 1}){width:${cw}px !important}` : ''}`;
+      const w = dimsFor(landOf[i]).w, m = mOf[i], cw = (w - m.l - m.r) * MM, off = ((Wmm - w) / 2 + m.l - d.m.l) * MM;
+      const natural = (Wmm - d.m.l - d.m.r) * MM;
+      wr += `#editor>:nth-child(${i + 1}){${cw > natural + 0.5 ? `width:${cw}px` : `max-width:${cw}px`} !important;box-sizing:border-box;position:relative;left:${off.toFixed(2)}px}${el.tagName === 'TABLE' ? `#editor>:nth-child(${i + 1}){width:${cw}px !important}` : ''}`;
     });
   }
   // in column mode every block is narrowed to one column while measuring; the blocks are then slid into place
@@ -305,7 +332,7 @@ export function layout() {
   P = H + GAP;
   const pr = page.getBoundingClientRect();
   const sc = pr.width / (Wmm * MM) || 1;
-  const us = units(editor, landOf);
+  const us = units(editor, landOf, mOf);
   for (const u of us) {
     const r = u.el.getBoundingClientRect();
     u.t = (r.top - pr.top) / sc; u.b = (r.bottom - pr.top) / sc;
@@ -378,11 +405,11 @@ export function layout() {
     return;
   }
   let S = 0, k = 0, prevB = mt, css = '', pend = null, carry = 0, tblS0 = 0, curT = null;
-  const newPage = (i, L) => { const dm = dimsFor(L), prev = pgs[i - 1]; return { top: prev ? prev.top + prev.h + GAP : 0, h: dm.h * MM, w: dm.w * MM, land: L }; };
-  pgs = [newPage(0, us.length ? us[0].land : baseLand)];
+  const newPage = (i, L, m) => { const dm = dimsFor(L), prev = pgs[i - 1]; return { top: prev ? prev.top + prev.h + GAP : 0, h: dm.h * MM, w: dm.w * MM, land: L, m }; };
+  pgs = [newPage(0, us.length ? us[0].land : baseLand, us.length ? us[0].m : d.m)];
   const cuts = [];
   secs = [];
-  const CT = () => pgs[k].top + mt, CB = () => pgs[k].top + pgs[k].h - mb;
+  const CT = () => pgs[k].top + pgs[k].m.t * MM, CB = () => pgs[k].top + pgs[k].h - pgs[k].m.b * MM;
   const nextTop = () => pgs[k].top + pgs[k].h + GAP;
   for (const u of us) {
     if (u.brk && u.el.classList.contains('sect-break')) pend = parseSect(u.el);
@@ -392,9 +419,10 @@ export function layout() {
     if (!u.row) carry = 0;
     let moved = 0;
     const tNow = () => u.t + S, bNow = () => u.b + S;
-    const go = () => { k++; pgs[k] = newPage(k, u.land); };
+    const go = () => { k++; pgs[k] = newPage(k, u.land, u.m); };
+    const umt = u.m.t * MM;
     const pushWhole = () => {
-      const delta = nextTop() + mt - tNow();
+      const delta = nextTop() + umt - tNow();
       if (delta > 0) {
         if (u.row) { S += delta; } else { moved += delta; S += delta; }
         go();
@@ -417,7 +445,7 @@ export function layout() {
         }
         const cutNat = px(cut);
         if ((cutNat - pieceTop) * sc < 1.5 * lh) break;
-        const gap = nextTop() + mt - (cutNat + S);
+        const gap = nextTop() + umt - (cutNat + S);
         if (gap <= 0) break;
         cuts.push({ range: cut.range, gap });
         S += gap; go(); did++; pieceTop = cutNat; last = cut.idx;
@@ -478,6 +506,7 @@ function drawHf(d, whole) {
   const zone = (which, i, top, height) => {
     const g = !whole && pgs[i];
     const place = g ? `left:${(Wpx() - g.w) / 2}px;right:auto;width:${g.w}px;` : '';
+    const pm = g && g.m ? g.m : d.m;
     const blank = h.firstDiff && i === 0;
     const hp = hfFor(i);
     const parts = slotParts(hp.eff)[which];
@@ -485,13 +514,14 @@ function drawHf(d, whole) {
     const any = !blank && ALIGNS.some((a) => parts[a].length);
     const cells = ALIGNS.map((a) => `<span class="hf-${a}">${blank ? '' : parts[a].map((p) => api.esc(typeof p === 'string' ? p : numText(h.numFormat, i + 1, n))).join(' · ')}</span>`).join('');
     const name = which === 'top' ? 'header' : 'footer';
-    html += `<div class="hf-zone hf-${name}${any ? '' : ' empty'}" style="${place}top:${top}px;height:${height}px;padding:0 ${d.m.r * MM}px 0 ${d.m.l * MM}px" title="Double-click to edit the ${name}">${any ? cells : `<span class="hf-hint">Double-click to add a ${name}</span>`}</div>`;
+    html += `<div class="hf-zone hf-${name}${any ? '' : ' empty'}" style="${place}top:${top}px;height:${height}px;padding:0 ${pm.r * MM}px 0 ${pm.l * MM}px" title="Double-click to edit the ${name}">${any ? cells : `<span class="hf-hint">Double-click to add a ${name}</span>`}</div>`;
   };
   for (let i = 0; i < zonesFor; i++) {
     const base = whole ? 0 : pgs[i].top;
-    zone('top', i, base, d.m.t * MM);
+    const pmg = !whole && pgs[i].m ? pgs[i].m : d.m;
+    zone('top', i, base, pmg.t * MM);
     if (whole) html += `<div class="hf-zone hf-footer-wrap" style="bottom:0;height:${d.m.b * MM}px"></div>`;
-    else zone('bottom', i, base + pgs[i].h - d.m.b * MM, d.m.b * MM);
+    else zone('bottom', i, base + pgs[i].h - pmg.b * MM, pmg.b * MM);
   }
   if (whole) {
     // one continuous sheet: footer sits at the very bottom
@@ -533,13 +563,15 @@ async function editSect(el) {
     { id: 'footer', label: 'Footer for this section (blank keeps the previous one)', value: s.footer !== undefined ? s.footer : '' },
     { id: 'restart', label: 'Restart page numbers at (blank continues)', type: 'number', value: s.restart != null ? s.restart : '' },
     { id: 'landscape', label: 'Landscape orientation', type: 'check', value: s.landscape !== undefined ? !!s.landscape : landBefore(el) },
-  ], { ok: 'Apply', note: 'These apply to the pages after this break. Landscape pages are drawn on screen (single-column documents), and carried into Word and print.' });
+    { id: 'margins', label: 'Margins', type: 'select', options: [['', 'Same as before'], ['normal', 'Normal'], ['narrow', 'Narrow'], ['moderate', 'Moderate'], ['wide', 'Wide']], value: s.margins || '' },
+  ], { ok: 'Apply', note: 'These apply to the pages after this break. Landscape pages and margins are drawn on screen (single-column documents), and carried into Word and print.' });
   if (!v) return;
   const o = {};
   if (v.header.trim()) o.header = v.header.trim();
   if (v.footer.trim()) o.footer = v.footer.trim();
   if (String(v.restart).trim() !== '') o.restart = Math.max(0, parseInt(v.restart, 10) || 1);
   if (!!v.landscape !== landBefore(el) || s.landscape !== undefined) o.landscape = !!v.landscape;
+  if (v.margins) o.margins = v.margins;
   api.begin();
   el.dataset.sect = JSON.stringify(o);
   api.done();
