@@ -28,7 +28,7 @@ A word processor that runs entirely in the browser. Live at https://kranmal.gith
 
 ## Known limits
 
-- Sections: a different orientation or margin per section is written to .docx and print. On screen all pages share one size, because the page engine uses a single page size; the section break itself says what changes (orientation, header, footer, page-number restart).
+- Sections: a section can switch to landscape or back, and each page is drawn at its own size on screen (centred, with its own header and footer) in single-column documents. In multi-column documents every page on screen keeps one size, and the section break says what changes. Margins are the same in every section. Orientation and per-section margins are written to .docx and print.
 - Document protection is a deterrent that stops editing in Inkwell and sets read-only in the .docx. It is not encryption, and anyone can open the file in another editor.
 - Dictation and translation rely on the browser (speech recognition, and the on-device Translator API). They are unavailable in browsers without them. The thesaurus is a built-in list of about 1,000 words.
 - Version history keeps the latest snapshots in this browser only. Macros record typing and formatting, not mouse selections.
