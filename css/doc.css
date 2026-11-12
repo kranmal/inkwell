@@ -139,5 +139,5 @@
 }
 
 /* in-text page gap inserted by the layout engine so a paragraph can continue on the next page */
-.pg-gap{display:block;height:0;margin:0;padding:0;border:0;line-height:0;font-size:0;pointer-events:none;user-select:none}
-@media print{.pg-gap{display:none !important}}
+.pg-gap,.pgs-gap{display:block;height:0;margin:0;padding:0;border:0;line-height:0;font-size:0;pointer-events:none;user-select:none}
+@media print{.pg-gap,.pgs-gap{display:none !important}}
