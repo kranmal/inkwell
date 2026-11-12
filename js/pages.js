@@ -127,7 +127,7 @@ function units(ed) {
   let i = 0, forced = false;
   for (const el of ed.children) {
     i++;
-    if (el.classList.contains('page-break')) { out.push({ el, brk: true }); forced = true; continue; }
+    if (el.classList.contains('page-break')) { out.push({ el, brk: true, sel: `#editor > :nth-child(${i})` }); forced = true; continue; }
     if ((el.tagName === 'UL' || el.tagName === 'OL') && el.children.length) {
       let j = 0;
       for (const li of el.children) { j++; out.push({ el: li, sel: `#editor > :nth-child(${i}) > :nth-child(${j})`, forced, split: splittable(li) }); forced = false; }
@@ -203,17 +203,12 @@ export function layout() {
   const d = api.pageDims();
   H = d.h * MM;
   const mt = d.m.t * MM, mb = d.m.b * MM;
-  rules.textContent = '';
-  paged = d.cols <= 1;
-  if (!paged) {
-    page.style.height = '';
-    P = H;
-    n = Math.max(1, Math.ceil((page.offsetHeight - 2) / H));
-    secs = [];
-    drawSheets(1, true);
-    drawHf(d, true);
-    return;
-  }
+  const cols = d.cols > 1 ? d.cols : 1;
+  const gapX = 12.5 * MM;
+  const colW = ((d.w - d.m.l - d.m.r) * MM - (cols - 1) * gapX) / cols;
+  // in column mode every block is narrowed to one column while measuring; the blocks are then slid into place
+  rules.textContent = cols > 1 ? `#editor>*{max-width:${colW}px !important;box-sizing:border-box}#editor>table{width:${colW}px !important}` : '';
+  paged = true;
   P = H + GAP;
   const pr = page.getBoundingClientRect();
   const sc = pr.width / (d.w * MM) || 1;
@@ -221,6 +216,42 @@ export function layout() {
   for (const u of us) {
     const r = u.el.getBoundingClientRect();
     u.t = (r.top - pr.top) / sc; u.b = (r.bottom - pr.top) / sc;
+  }
+  if (cols > 1) {
+    const colH = H - mt - mb;
+    let c = 0, kk = 0, SS = 0, pend2 = null, css2 = '', first = true;
+    secs = [];
+    const advance = () => {
+      c++;
+      if (c >= cols) { c = 0; kk++; if (pend2) { secs.push({ ...pend2, page: kk }); pend2 = null; } }
+    };
+    let force = false;
+    for (const u of us) {
+      if (u.brk) {
+        if (u.el.classList.contains('sect-break')) pend2 = parseSect(u.el);
+        force = true;
+        const x = c * (colW + gapX);
+        if (x || SS) css2 += `${u.sel}{position:relative;left:${x.toFixed(2)}px;top:${SS.toFixed(2)}px}`;
+        continue;
+      }
+      const top = () => kk * P + mt, bottom = () => kk * P + H - mb;
+      if (first) { first = false; SS = 0; }
+      else if (force || u.forced) { if (c !== 0 || (u.t + SS) > top() + 1) { c = cols - 1; advance(); } SS = top() - u.t; }
+      else if (u.b + SS > bottom() + 0.5 && u.t + SS > top() + 1) { advance(); SS = top() - u.t; }
+      force = false;
+      if (u.b - u.t > colH) { // taller than a column: it keeps its place and the next block starts on a fresh page
+        kk = Math.max(kk, Math.floor((u.b + SS - 1) / P)); c = cols - 1;
+      }
+      const x = c * (colW + gapX);
+      if (x || SS) css2 += `${u.sel}{position:relative;left:${x.toFixed(2)}px;top:${SS.toFixed(2)}px}`;
+    }
+    n = kk + 1;
+    const total = n * H + (n - 1) * GAP;
+    rules.textContent += css2 + `#editor{height:${total - mt - mb}px !important;min-height:0 !important}`;
+    page.style.height = total + 'px';
+    drawSheets(n, false);
+    drawHf(d, false);
+    return;
   }
   let S = 0, k = 0, prevB = mt, css = '', pend = null, carry = 0, tblS0 = 0, curT = null;
   const cuts = [];

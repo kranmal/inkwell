@@ -229,14 +229,12 @@ function pageDims() {
 }
 function pageCss() {
   const d = pageDims();
-  return `@page { size: ${d.w}mm ${d.h}mm; margin: ${d.m.t}mm ${d.m.r}mm ${d.m.b}mm ${d.m.l}mm; ${pagesMod.marginBoxes()} }${pagesMod.firstPageCss()}${pagesMod.sectionCss()}`;
+  return `@page { size: ${d.w}mm ${d.h}mm; margin: ${d.m.t}mm ${d.m.r}mm ${d.m.b}mm ${d.m.l}mm; ${pagesMod.marginBoxes()} }${pagesMod.firstPageCss()}${pagesMod.sectionCss()}${d.cols > 1 ? `@media print{#editor,.doc{column-count:${d.cols};column-gap:12.5mm}}` : ''}`;
 }
 function applyPage() {
   const d = pageDims();
   const set = (k, v) => page.style.setProperty(k, v + 'mm');
   set('--page-w', d.w); set('--page-h', d.h); set('--m-t', d.m.t); set('--m-r', d.m.r); set('--m-b', d.m.b); set('--m-l', d.m.l);
-  editor.style.columnCount = d.cols > 1 ? d.cols : '';
-  editor.style.columnGap = d.cols > 1 ? '12.5mm' : '';
   let st = $('#print-page');
   if (!st) { st = document.createElement('style'); st.id = 'print-page'; document.head.append(st); }
   st.textContent = pageCss();
@@ -1023,7 +1021,7 @@ function dataAttrs() {
 async function buildHtml() {
   const css = await fetch('css/doc.css').then((r) => r.text()).catch(() => '');
   const d = pageDims();
-  const html = `<!doctype html>\n<html lang="${editor.lang}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="generator" content="Inkwell"><title>${esc(doc.title)}</title><style>${css}\nbody{margin:0;background:#f1f1ee}.doc{box-sizing:border-box;max-width:${d.w}mm;margin:24px auto;padding:${d.m.t}mm ${d.m.r}mm ${d.m.b}mm ${d.m.l}mm;background:#fff;white-space:pre-wrap;overflow-wrap:break-word}.doc .page-break::after{display:none}@media print{body{background:none}.doc{margin:0;padding:0;max-width:none}}\n${stylesMod.css()}\n${pageCss()}</style></head><body><div class="doc"${doc.theme !== 'modern' ? ` data-theme="${doc.theme}"` : ''}${dataAttrs()}>${noGaps(editor.innerHTML)}</div></body></html>`;
+  const html = `<!doctype html>\n<html lang="${editor.lang}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="generator" content="Inkwell"><title>${esc(doc.title)}</title><style>${css}\n${d.cols > 1 ? `.doc{column-count:${d.cols};column-gap:12.5mm}` : ''}body{margin:0;background:#f1f1ee}.doc{box-sizing:border-box;max-width:${d.w}mm;margin:24px auto;padding:${d.m.t}mm ${d.m.r}mm ${d.m.b}mm ${d.m.l}mm;background:#fff;white-space:pre-wrap;overflow-wrap:break-word}.doc .page-break::after{display:none}@media print{body{background:none}.doc{margin:0;padding:0;max-width:none}}\n${stylesMod.css()}\n${pageCss()}</style></head><body><div class="doc"${doc.theme !== 'modern' ? ` data-theme="${doc.theme}"` : ''}${dataAttrs()}>${noGaps(editor.innerHTML)}</div></body></html>`;
   return new Blob([html], { type: 'text/html' });
 }
 async function saveHtml() { download(await buildHtml(), fileBase() + '.html'); }
