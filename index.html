@@ -93,6 +93,18 @@
     <div class="grp">
       <button class="rb wide" data-cmd="pageBreak" data-icon="pageBreak" title="Page break (⌘↵)">Page break</button>
       <button class="rb wide" data-cmd="hr" data-icon="minus">Divider</button>
+      <button class="rb wide" data-cmd="hf" data-icon="header">Header &amp; footer</button>
+    </div>
+    <div class="grp">
+      <button class="rb wide drop" data-menu="m-shapes" data-icon="shapes">Shapes</button>
+      <button class="rb wide" data-cmd="textbox" data-icon="textBox">Text box</button>
+      <button class="rb wide" data-cmd="chart" data-icon="chart">Chart</button>
+    </div>
+    <div class="grp">
+      <button class="rb wide" data-cmd="footnote" data-icon="footnote">Footnote</button>
+      <button class="rb wide" data-cmd="endnote" data-icon="footnote">Endnote</button>
+      <button class="rb wide" data-cmd="toc" data-icon="toc">Contents</button>
+      <button class="rb wide" data-cmd="comment" data-icon="comment">Comment</button>
     </div>
     <div class="grp">
       <button class="rb wide" data-cmd="date" data-icon="calendar">Date</button>
@@ -103,7 +115,15 @@
   <!-- DESIGN -->
   <div class="panel" data-panel="design">
     <div class="grp themes" id="themes"></div>
-    <div class="grp"><span class="hint">Themes restyle the whole document: fonts, headings and accent colour.</span></div>
+    <div class="grp">
+      <select class="sel" id="tc-font" aria-label="Body font" title="Body font"></select>
+      <select class="sel" id="tc-head" aria-label="Heading font" title="Heading font"></select>
+      <label class="color-pick" title="Accent colour">Accent<input type="color" id="tc-accent" value="#0f766e" aria-label="Accent colour"></label>
+      <button class="rb wide" data-cmd="themeReset" id="tc-reset" data-icon="undo">Reset</button>
+    </div>
+    <div class="grp">
+      <button class="rb wide" data-cmd="stylesDlg" data-icon="palette">Modify styles</button>
+    </div>
   </div>
 
   <!-- LAYOUT -->
@@ -132,6 +152,15 @@
       <button class="rb wide" data-cmd="wordCount" data-icon="hash">Word count</button>
       <button class="rb wide" data-cmd="readAloud" data-icon="volume" id="read-btn">Read aloud</button>
     </div>
+    <div class="grp">
+      <button class="rb wide" data-cmd="comment" data-icon="comment">New comment</button>
+      <button class="rb wide" data-cmd="reviewPane" data-icon="comment">Comments &amp; changes</button>
+    </div>
+    <div class="grp">
+      <button class="rb wide" data-cmd="track" data-icon="track" aria-pressed="false">Track changes</button>
+      <button class="rb wide" data-cmd="acceptAll" data-icon="check">Accept all</button>
+      <button class="rb wide" data-cmd="rejectAll" data-icon="x">Reject all</button>
+    </div>
   </div>
 
   <!-- VIEW -->
@@ -159,6 +188,12 @@
     </div>
     <div class="grp">
       <button class="rb wide" data-cmd="headerRow" data-icon="table">Header row</button>
+      <button class="rb wide" data-cmd="mergeCells" data-icon="merge">Merge cells</button>
+      <button class="rb wide" data-cmd="splitCell" data-icon="split">Split cell</button>
+    </div>
+    <div class="grp">
+      <button class="rb wide drop" data-menu="m-shade" data-icon="palette">Shading</button>
+      <button class="rb wide drop" data-menu="m-borders" data-icon="borders">Borders</button>
     </div>
     <div class="grp">
       <button class="rb wide" data-cmd="delRow" data-icon="trash">Delete row</button>
@@ -184,7 +219,9 @@
         <button class="rb" data-cmd="imgAlign" data-val="left" title="Wrap, left" data-icon="alignLeft"></button>
         <button class="rb" data-cmd="imgAlign" data-val="center" title="Centre" data-icon="alignCenter"></button>
         <button class="rb" data-cmd="imgAlign" data-val="right" title="Wrap, right" data-icon="alignRight"></button>
-        <button class="rb" data-cmd="imgDelete" title="Delete picture" data-icon="trash"></button>
+        <button class="rb for-shape" data-menu="m-fill" title="Fill colour" data-icon="palette"></button>
+        <button class="rb for-chart" data-cmd="chartEdit" title="Edit chart data" data-icon="chart"></button>
+        <button class="rb" data-cmd="imgDelete" title="Delete" data-icon="trash"></button>
       </div>
       <span class="img-handle" id="img-handle" title="Drag to resize"></span>
     </div>
@@ -222,6 +259,27 @@
         </div>
       </div>
     </section>
+    <!-- Review -->
+    <section id="review-pane" hidden>
+      <div class="pane-head"><h2>Comments and changes</h2><button class="rb" data-cmd="closeSide" data-icon="x" aria-label="Close"></button></div>
+      <div class="find-form">
+        <label class="field"><span>Your name</span><input id="rv-author" type="text" autocomplete="off" maxlength="40"></label>
+        <div id="rv-compose" class="rv-compose" hidden>
+          <p class="issue-ctx" id="rv-quote"></p>
+          <label class="field"><span>Comment</span><textarea id="rv-text" rows="3"></textarea></label>
+          <div class="row">
+            <button class="btn primary" data-cmd="commentSave" id="rv-save">Add comment</button>
+            <button class="btn" data-cmd="commentCancel">Cancel</button>
+          </div>
+        </div>
+        <div class="row" id="rv-bulk" hidden>
+          <button class="btn" data-cmd="acceptAll">Accept all</button>
+          <button class="btn" data-cmd="rejectAll">Reject all</button>
+        </div>
+      </div>
+      <p class="rv-empty" id="rv-empty">No comments or tracked changes yet. Select some text and choose New comment, or turn on Track changes.</p>
+      <div class="issues" id="rv-list"></div>
+    </section>
   </aside>
 </main>
 
@@ -229,6 +287,7 @@
   <span id="st-page">Page 1 of 1</span>
   <button class="st-btn" data-cmd="wordCount" id="st-words">0 words</button>
   <span id="st-lang" class="st-dim"></span>
+  <button class="st-btn" data-cmd="reviewPane" id="st-track" hidden>Tracking changes</button>
   <button class="st-btn proof-chip" data-cmd="proofPane" id="st-proof"><i class="dot"></i><span>Checking…</span></button>
   <span class="spacer"></span>
   <button class="st-btn" data-cmd="zoomOut" aria-label="Zoom out">−</button>
@@ -250,6 +309,20 @@
   <button data-cmd="style" data-val="h3"><span class="pv pv-h3">Heading 3</span><kbd>⌥⌘3</kbd></button>
   <button data-cmd="style" data-val="quote"><span class="pv pv-quote">Quote</span></button>
   <button data-cmd="style" data-val="code"><span class="pv pv-code">Code block</span></button>
+  <hr id="sty-sep">
+  <button data-cmd="stylesDlg">Modify styles…</button>
+</div>
+
+<div class="menu" id="m-shapes" hidden></div>
+<div class="menu pal" id="m-fill" hidden><div class="swatches"></div></div>
+<div class="menu pal" id="m-shade" hidden><div class="swatches"></div>
+  <button data-cmd="shade" data-val="">No fill</button></div>
+<div class="menu" id="m-borders" hidden>
+  <button data-cmd="borders" data-val="">All borders</button>
+  <button data-cmd="borders" data-val="outer">Outside only</button>
+  <button data-cmd="borders" data-val="horizontal">Horizontal lines</button>
+  <button data-cmd="borders" data-val="striped">Striped rows</button>
+  <button data-cmd="borders" data-val="none">No borders</button>
 </div>
 
 <div class="menu" id="m-case" hidden>
@@ -355,6 +428,66 @@
     <h2>Word count</h2>
     <dl class="stats" id="stats"></dl>
     <div class="dlg-actions"><span class="spacer"></span><button class="btn primary" value="ok">Done</button></div>
+  </form>
+</dialog>
+
+<dialog id="dlg-hf" class="dlg">
+  <form method="dialog">
+    <h2>Header and footer</h2>
+    <div class="field-row">
+      <label class="field grow"><span>Header text</span><input id="hf-header" type="text" autocomplete="off" maxlength="120"></label>
+      <label class="field"><span>Position</span><select id="hf-header-align"><option value="left">Left</option><option value="center">Centre</option><option value="right">Right</option></select></label>
+    </div>
+    <div class="field-row">
+      <label class="field grow"><span>Footer text</span><input id="hf-footer" type="text" autocomplete="off" maxlength="120"></label>
+      <label class="field"><span>Position</span><select id="hf-footer-align"><option value="left">Left</option><option value="center">Centre</option><option value="right">Right</option></select></label>
+    </div>
+    <div class="field-row">
+      <label class="field grow"><span>Page numbers</span><select id="hf-num"><option value="none">None</option><option value="top-right">Top right</option><option value="bottom-left">Bottom left</option><option value="bottom-center">Bottom centre</option><option value="bottom-right">Bottom right</option></select></label>
+      <label class="field grow"><span>Number format</span><select id="hf-format"><option value="1">1, 2, 3</option><option value="page">Page 1</option><option value="of">Page 1 of 3</option></select></label>
+    </div>
+    <label class="check"><input type="checkbox" id="hf-first">Leave the first page blank</label>
+    <div class="dlg-actions"><span class="spacer"></span><button class="btn" value="cancel">Cancel</button><button class="btn primary" value="ok">Apply</button></div>
+  </form>
+</dialog>
+
+<dialog id="dlg-chart" class="dlg wide">
+  <form method="dialog">
+    <h2>Chart</h2>
+    <div class="field-row">
+      <label class="field"><span>Type</span><select id="ch-type"><option value="column">Column</option><option value="bar">Bar</option><option value="line">Line</option><option value="pie">Pie</option></select></label>
+      <label class="field grow"><span>Title</span><input id="ch-title" type="text" autocomplete="off" maxlength="80"></label>
+    </div>
+    <label class="field"><span>Data: first row is the series names, first column is the labels</span><textarea id="ch-data" rows="8" spellcheck="false"></textarea></label>
+    <p class="dlg-note">Separate values with commas or paste straight from a spreadsheet. A pie chart uses the first series.</p>
+    <div class="dlg-actions"><span class="spacer"></span><button class="btn" value="cancel">Cancel</button><button class="btn primary" value="ok" id="ch-ok">Insert chart</button></div>
+  </form>
+</dialog>
+
+<dialog id="dlg-styles" class="dlg wide">
+  <form method="dialog">
+    <h2>Modify styles</h2>
+    <div class="field-row">
+      <label class="field grow"><span>Style</span><select id="sty-pick"></select></label>
+      <button class="btn" type="button" id="sty-new">New style</button>
+    </div>
+    <label class="field" id="sty-name-row" hidden><span>Name</span><input id="sty-name" type="text" autocomplete="off" maxlength="40"></label>
+    <div class="field-row">
+      <label class="field grow"><span>Font</span><select id="sty-font"></select></label>
+      <label class="field narrow"><span>Size (pt)</span><input id="sty-size" type="number" min="6" max="96" step="0.5" placeholder="Auto"></label>
+      <label class="field narrow"><span>Colour</span><span class="color-row"><input type="checkbox" id="sty-color-on" aria-label="Use a custom colour"><input type="color" id="sty-color" value="#1c1c1c"></span></label>
+    </div>
+    <div class="field-row">
+      <label class="field grow"><span>Weight</span><select id="sty-bold"><option value="">Default</option><option value="normal">Regular</option><option value="bold">Bold</option></select></label>
+      <label class="field grow"><span>Slant</span><select id="sty-italic"><option value="">Default</option><option value="normal">Upright</option><option value="italic">Italic</option></select></label>
+      <label class="field grow"><span>Alignment</span><select id="sty-align"><option value="">Default</option><option value="left">Left</option><option value="center">Centre</option><option value="right">Right</option><option value="justify">Justified</option></select></label>
+    </div>
+    <div class="field-row">
+      <label class="field grow"><span>Space before (pt)</span><input id="sty-before" type="number" min="0" max="96" step="1" placeholder="Auto"></label>
+      <label class="field grow"><span>Space after (pt)</span><input id="sty-after" type="number" min="0" max="96" step="1" placeholder="Auto"></label>
+    </div>
+    <div class="sty-preview doc" id="sty-preview" aria-label="Preview"></div>
+    <div class="dlg-actions"><button class="btn" type="button" id="sty-reset">Reset to default</button><span class="spacer"></span><button class="btn primary" value="ok">Done</button></div>
   </form>
 </dialog>
 

@@ -8,7 +8,9 @@ export function blocksOf(root, { skipCode = false } = {}) {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT, {
     acceptNode(n) {
       if (n.nodeType !== 1) return NodeFilter.FILTER_ACCEPT;
-      if (n.classList.contains('page-break')) return NodeFilter.FILTER_REJECT;
+      const c = n.classList;
+      if (c.contains('page-break') || c.contains('toc') || c.contains('chart') || c.contains('shape') || c.contains('fn-ref') || c.contains('en-ref')) return NodeFilter.FILTER_REJECT;
+      if (n.tagName === 'DEL' && c.contains('tc')) return NodeFilter.FILTER_REJECT;
       if (skipCode && (n.tagName === 'PRE' || n.tagName === 'CODE')) return NodeFilter.FILTER_REJECT;
       return NodeFilter.FILTER_ACCEPT;
     },
