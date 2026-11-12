@@ -189,7 +189,14 @@ export async function exportDocx(root, { title = 'Document', page, hf = null, st
     if (node.nodeType === 3) return textRun(node.data, f);
     if (node.nodeType !== 1) return '';
     const t = node.tagName;
-    if (t === 'BR') return '<w:r><w:br/></w:r>';
+    if (t === 'BR') {
+      // A break that ends its block is only the browser's placeholder, not a real line break.
+      for (let n = node; n && n !== root; n = n.parentNode) {
+        if (n.nextSibling) return /^(P|H[1-6]|LI|TD|TH|DIV|BLOCKQUOTE|PRE|UL|OL|TABLE)$/.test(n.nextSibling.nodeName) ? '' : '<w:r><w:br/></w:r>';
+        if (/^(P|H[1-6]|LI|TD|TH|DIV|BLOCKQUOTE|PRE)$/.test(n.parentNode.nodeName)) return '';
+      }
+      return '';
+    }
     if (t === 'IMG') return imageRun(node);
     if (t === 'UL' || t === 'OL' || t === 'TABLE') return '';
     const cl = node.classList;

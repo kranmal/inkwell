@@ -74,8 +74,8 @@ export function parseData(text) {
   const rows = text.replace(/\r/g, '').split('\n').map((l) => l.trim()).filter(Boolean).map((l) => l.split(l.includes('\t') ? '\t' : ',').map((c) => c.trim()));
   if (!rows.length) return null;
   const num = (v) => { const n = Number(String(v).replace(/[,\s%£$€]/g, '')); return v !== '' && v != null && isFinite(n) ? n : null; };
-  const hasHead = rows[0].slice(1).some((c) => num(c) === null) || rows.length === 1;
-  const head = hasHead ? rows.shift() : null;
+  // The first row is always the series names (they are often years, so they can't be told apart from data).
+  const head = rows.length > 1 ? rows.shift() : null;
   const cols = Math.max(0, ...rows.map((r) => r.length)) - 1;
   if (!rows.length || cols < 1) return null;
   const series = [];
