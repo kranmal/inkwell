@@ -240,6 +240,27 @@ rule('passive', 'style', /\b(is|are|was|were|be|been|being)\s+([a-z]+ed|written|
 const STRONGER = { big: ['huge', 'enormous'], small: ['tiny'], tired: ['exhausted'], important: ['crucial', 'essential'], good: ['excellent', 'great'], bad: ['terrible', 'awful'], happy: ['delighted', 'thrilled'], sad: ['miserable'], angry: ['furious'], hungry: ['starving'], cold: ['freezing'], hot: ['scorching'], scared: ['terrified'], funny: ['hilarious'], smart: ['brilliant'], tasty: ['delicious'], dirty: ['filthy'], clean: ['spotless'], old: ['ancient'], pretty: ['beautiful'] };
 rule('very', 'style', new RegExp(`\\b(very|really)\\s+(${Object.keys(STRONGER).join('|')})\\b`, 'gi'), (m) => whole(m, 'A stronger word may work better', ...STRONGER[m[2].toLowerCase()]));
 
+/* ---- sentence structure and more confusables ---- */
+rule('comma-splice', 'grammar', /([a-z]{3,}),\s+(however|therefore|thus|hence|consequently|moreover|furthermore|nevertheless)\s*,(?=\s+(?:I|we|he|she|they|it|there|this|that)\b)/gi,
+  (m) => ({ s: m.index + m[1].length, e: m.index + m[0].length, msg: 'Two full sentences joined by a comma: use a full stop or semicolon', sugg: [`; ${m[2].toLowerCase()},`, `. ${m[2].charAt(0).toUpperCase() + m[2].slice(1).toLowerCase()},`] }));
+rule('long-sentence', 'style', /[A-Z][^.!?\n]*[.!?]/g, (m) => {
+  const words = m[0].trim().split(/\s+/).length;
+  if (words < 45) return null;
+  return { s: m.index, e: m.index + m[0].length, msg: `This sentence is ${words} words long: consider splitting it`, sugg: [] };
+});
+rule('filler', 'style', /\b(basically|literally|actually|really just|in my opinion|I think that|it is worth noting that|needless to say)\b/gi, (m) => ({ s: m.index, e: m.index + m[0].length, msg: 'This adds little: consider removing it', sugg: [] }));
+rule('theyre-their', 'grammar', /\bthey['’]re\s+(own|car|house|home|name|work|friends?|family|parents|children|money|book|books|team|company|office)\b/gi, (m) => whole(m, '“Their” shows possession; “they’re” is “they are”', `their ${m[1]}`));
+rule('there-their2', 'grammar', /\bthere\s+(own|car|house|home|name|friends?|family|parents|children|money|team|company|office)\b/gi, (m) => whole(m, '“Their” shows possession', `their ${m[1]}`));
+rule('who-that', 'style', /\b(the\s+(?:man|woman|person|people|boy|girl|student|teacher|customer|user|friend|colleague))\s+that\b/gi, (m) => whole(m, 'Use “who” for people', `${m[1]} who`));
+rule('could-had', 'grammar', /\bif\s+(I|he|she|it|we|they|you)\s+(would|will)\s+(have|had|be|go|do|know)\b/gi, (m) => whole(m, 'After “if”, use the past tense, not “would”', `if ${m[1]} ${{ have: 'had', had: 'had', be: 'were', go: 'went', do: 'did', know: 'knew' }[m[3].toLowerCase()]}`));
+rule('literally-figurative', 'style', /\bvery\s+(unique|perfect|essential|dead|impossible|final|complete)\b/gi, (m) => whole(m, 'This word is absolute: “very” adds nothing', m[1]));
+rule('lay-lie', 'grammar', /\b(?:I|you|we|they|to)\s+(?:am\s+|was\s+|will\s+|going\s+to\s+)?(laying)\s+(down|in bed|on the (?:bed|couch|floor|sofa))\b/gi, (m) => whole(m, 'Use “lying”: to lay needs an object', m[0].replace(/laying/i, 'lying')));
+rule('between-and', 'grammar', /\bbetween\s+\w+\s+(?:or|to)\s+\w+\b/gi, (m) => {
+  if (/\bbetween\s+\w+\s+to\s+\d/i.test(m[0])) return null;
+  return whole(m, 'Use “between … and …”', m[0].replace(/\s(or|to)\s/i, ' and '));
+});
+rule('should-of2', 'grammar', /\b(shoulda|coulda|woulda)\b/gi, (m) => whole(m, 'Write this out in full', `${m[1].slice(0, -1)} have`));
+
 export function checkGrammar(text) {
   const out = [];
   if (!text || !/\S/.test(text)) return out;

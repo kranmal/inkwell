@@ -205,7 +205,11 @@ function bibEntry(src, st, ord) {
   const book = src.type !== 'article' && src.type !== 'website';
   if (st === 'ieee') {
     const a = ns.map((n) => `${initials(n.first)} ${n.last}`.trim()).join(', ');
-    return `[${ord.indexOf(src.id) + 1}] ${e(a)}${a ? ', ' : ''}${book ? `<i>${t}</i>` : `“${t},”`}${pub ? ` ${book ? '' : '<i>'}${pub}${book ? '' : '</i>'},` : ''} ${yr}.${url}`;
+    const head = book ? `<i>${t}</i>` : `“${t},”`;
+    const venue = pub ? (book ? pub : `<i>${pub}</i>`) : '';
+    // books: Author, <i>Title</i>, Publisher, Year.   articles: Author, "Title," <i>Journal</i>, Year.
+    const rest = book ? [venue, yr].filter(Boolean).join(', ') : [venue, yr].filter(Boolean).join(', ');
+    return `[${ord.indexOf(src.id) + 1}] ${e(a)}${a ? ', ' : ''}${head}${book ? ',' : ''} ${rest}.${url}`;
   }
   if (st === 'mla') {
     const a = ns.length ? `${ns[0].last}${ns[0].first ? ', ' + ns[0].first : ''}${ns.length === 2 ? `, and ${ns[1].first} ${ns[1].last}` : ns.length > 2 ? ', et al' : ''}.` : '';

@@ -1,8 +1,9 @@
 // Writes a real .docx (WordprocessingML in a zip) from the editor DOM.
 import { gridOf } from './tables.js';
-import { toPng } from './objects.js';
+import { toPng, readCfg, PALETTE } from './objects.js';
+import { chartXml, workbook } from './docxchart.js';
 import { eqOmml, smartPng } from './extras.js';
-const NS = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math"';
+const NS = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math" xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape" xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"';
 const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const TW_MM = 56.6929;           // twips per mm
 const EMU_PX = 9525;
@@ -85,6 +86,8 @@ async function prepareImages(root, maxPx) {
   }
   // Shapes and charts travel as pictures.
   for (const el of root.querySelectorAll('.chart, .shape')) {
+    if (el.matches('.shape') || !readCfg(el)) { /* shapes are native too; fall through only when no chart data */ }
+    if (el.matches('.shape') || (el.matches('.chart') && readCfg(el))) continue;
     try {
       const d = await toPng(el);
       if (!d) continue;
@@ -157,6 +160,28 @@ export async function exportDocx(root, { title = 'Document', page, hf = null, st
     return `<w:r>${rPr(f)}${body}</w:r>`;
   }
 
+  // ----- editable objects: charts, shapes, text boxes -----
+  const charts = [];
+  let drawN = 500;
+  const A = 'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"';
+  function chartRun(el) {
+    const cfg = readCfg(el);
+    if (!cfg || plain) return null;
+    const n = charts.push(cfg);
+    const id = rel('http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart', `charts/chart${n}.xml`);
+    const w = Math.min(contentMm / 25.4 * 96, parseFloat(el.style.width) || 640), h = w * 360 / 640;
+    const cx = Math.round(w * EMU_PX), cy = Math.round(h * EMU_PX), k = ++drawN;
+    return `<w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="${cx}" cy="${cy}"/><wp:docPr id="${k}" name="Chart ${n}" descr="${esc(cfg.title || 'Chart')}"/><wp:cNvGraphicFramePr/><a:graphic ${A}><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/chart"><c:chart r:id="${id}"/></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>`;
+  }
+  const PRESET = { rect: 'rect', round: 'roundRect', ellipse: 'ellipse', tri: 'triangle', arrow: 'rightArrow', line: 'rect', star: 'star5' };
+  function shapeRun(el) {
+    if (plain) return '';
+    const kind = Object.keys(PRESET).find((q) => el.classList.contains('shape-' + q)) || 'rect';
+    const w = Math.max(4, parseFloat(el.style.width) || el.offsetWidth || 100), h = Math.max(2, parseFloat(el.style.height) || el.offsetHeight || 60);
+    const cx = Math.round(w * EMU_PX), cy = Math.round(h * EMU_PX), k = ++drawN;
+    const fill = hex(el.style.backgroundColor) || '2A78D6';
+    return `<w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="${cx}" cy="${cy}"/><wp:docPr id="${k}" name="Shape ${k}"/><wp:cNvGraphicFramePr/><a:graphic ${A}><a:graphicData uri="http://schemas.microsoft.com/office/word/2010/wordprocessingShape"><wps:wsp><wps:cNvSpPr/><wps:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm><a:prstGeom prst="${PRESET[kind]}"><a:avLst/></a:prstGeom><a:solidFill><a:srgbClr val="${fill}"/></a:solidFill><a:ln><a:noFill/></a:ln></wps:spPr><wps:bodyPr/></wps:wsp></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>`;
+  }
   function imageRun(img) {
     const d = images.get(img);
     if (!d || plain) return '';
@@ -209,7 +234,9 @@ export async function exportDocx(root, { title = 'Document', page, hf = null, st
     if (t === 'IMG') return imageRun(node);
     if (t === 'UL' || t === 'OL' || t === 'TABLE') return '';
     const cl = node.classList;
-    if (cl.contains('shape') || cl.contains('chart') || cl.contains('smartart')) return imageRun(node);
+    if (cl.contains('shape')) return shapeRun(node);
+    if (cl.contains('chart')) return chartRun(node) || imageRun(node);
+    if (cl.contains('smartart')) return imageRun(node);
     if (t === 'SPAN' && cl.contains('idx')) return '';
     if (t === 'SPAN' && cl.contains('eq')) {
       if (!plain && node.dataset.eq) { try { return eqOmml(node.dataset.eq); } catch { /* fall back to text */ } }
@@ -367,11 +394,13 @@ export async function exportDocx(root, { title = 'Document', page, hf = null, st
   }
 
   function textbox(el) {
-    const w = Math.min(contentTw, Math.round((parseFloat(el.style.width) || 260) * 15));
-    const b = (k) => `<w:${k} w:val="single" w:sz="6" w:space="0" w:color="9A9A9A"/>`;
+    const wpx = Math.min(contentMm / 25.4 * 96, parseFloat(el.style.width) || el.offsetWidth || 260);
+    const hpx = Math.max(30, el.offsetHeight || 60);
     let inner = blocks(el, { cell: true });
     if (!/<\/w:p>$/.test(inner)) inner += '<w:p/>';
-    return `<w:tbl><w:tblPr><w:tblW w:w="${w}" w:type="dxa"/><w:tblBorders>${['top', 'left', 'bottom', 'right'].map(b).join('')}</w:tblBorders><w:tblCellMar><w:top w:w="100" w:type="dxa"/><w:left w:w="140" w:type="dxa"/><w:bottom w:w="100" w:type="dxa"/><w:right w:w="140" w:type="dxa"/></w:tblCellMar></w:tblPr><w:tblGrid><w:gridCol w:w="${w}"/></w:tblGrid><w:tr><w:tc><w:tcPr><w:tcW w:w="${w}" w:type="dxa"/></w:tcPr>${inner}</w:tc></w:tr></w:tbl><w:p><w:pPr><w:spacing w:after="0" w:line="120" w:lineRule="auto"/></w:pPr></w:p>`;
+    const cx = Math.round(wpx * EMU_PX), cy = Math.round(hpx * EMU_PX), k = ++drawN;
+    const bg = hex(el.style.backgroundColor);
+    return `<w:p><w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="${cx}" cy="${cy}"/><wp:docPr id="${k}" name="Text Box ${k}"/><wp:cNvGraphicFramePr/><a:graphic ${A}><a:graphicData uri="http://schemas.microsoft.com/office/word/2010/wordprocessingShape"><wps:wsp><wps:cNvSpPr txBox="1"/><wps:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom>${bg ? `<a:solidFill><a:srgbClr val="${bg}"/></a:solidFill>` : '<a:noFill/>'}<a:ln w="9525"><a:solidFill><a:srgbClr val="9A9A9A"/></a:solidFill></a:ln></wps:spPr><wps:txbx><w:txbxContent>${inner}</w:txbxContent></wps:txbx><wps:bodyPr lIns="91440" tIns="45720" rIns="91440" bIns="45720"><a:noAutofit/></wps:bodyPr></wps:wsp></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>`;
   }
 
   function block(el, env) {
@@ -379,7 +408,7 @@ export async function exportDocx(root, { title = 'Document', page, hf = null, st
     const c0 = el.classList;
     if (c0.contains('footnotes') || c0.contains('endnotes')) return '';
     if (c0.contains('toc')) return toc(el);
-    if (c0.contains('chart')) return `<w:p><w:pPr><w:jc w:val="center"/></w:pPr>${imageRun(el)}</w:p>`;
+    if (c0.contains('chart')) return `<w:p><w:pPr><w:jc w:val="center"/></w:pPr>${chartRun(el) || imageRun(el)}</w:p>`;
     if (c0.contains('textbox')) return textbox(el);
     if (c0.contains('smartart')) return `<w:p><w:pPr><w:jc w:val="center"/></w:pPr>${imageRun(el)}</w:p>`;
     if (c0.contains('index-row')) {
@@ -546,7 +575,8 @@ export async function exportDocx(root, { title = 'Document', page, hf = null, st
 
   const part = (on, file, kind = file) => (on ? `<Override PartName="/word/${file}.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.${kind}+xml"/>` : '');
   const zip = new JSZip();
-  zip.file('[Content_Types].xml', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="png" ContentType="image/png"/><Default Extension="jpeg" ContentType="image/jpeg"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/><Override PartName="/word/numbering.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml"/><Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>'
+  zip.file('[Content_Types].xml', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="png" ContentType="image/png"/><Default Extension="jpeg" ContentType="image/jpeg"/><Default Extension="xlsx" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/><Override PartName="/word/numbering.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml"/><Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>'
+    + charts.map((_, i) => `<Override PartName="/word/charts/chart${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.drawingml.chart+xml"/>`).join('')
     + part(true, 'settings') + parts.map((q) => part(true, q.file, q.kind)).join('') + part(footnotesXml, 'footnotes') + part(endnotesXml, 'endnotes') + part(commentsXml, 'comments') + '</Types>');
   zip.file('_rels/.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="${R}/officeDocument" Target="word/document.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/></Relationships>`);
   zip.file('docProps/core.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><dc:title>${esc(title)}</dc:title><dc:creator>Inkwell</dc:creator><dcterms:created xsi:type="dcterms:W3CDTF">${now}</dcterms:created><dcterms:modified xsi:type="dcterms:W3CDTF">${now}</dcterms:modified></cp:coreProperties>`);
@@ -559,6 +589,12 @@ export async function exportDocx(root, { title = 'Document', page, hf = null, st
   if (endnotesXml) zip.file('word/endnotes.xml', endnotesXml);
   if (commentsXml) zip.file('word/comments.xml', commentsXml);
   zip.file('word/_rels/document.xml.rels', docRels);
+  for (const [i, cfg] of charts.entries()) {
+    const n = i + 1;
+    zip.file(`word/charts/chart${n}.xml`, chartXml(cfg, PALETTE));
+    zip.file(`word/charts/_rels/chart${n}.xml.rels`, `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/package" Target="../embeddings/Microsoft_Excel_Sheet${n}.xlsx"/></Relationships>`);
+    zip.file(`word/embeddings/Microsoft_Excel_Sheet${n}.xlsx`, await workbook(JSZip, cfg));
+  }
   for (const d of images.values()) zip.file(`word/media/image${d.n}.${d.ext}`, d.bytes);
   return zip.generateAsync({ type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', compression: 'DEFLATE' });
 }
