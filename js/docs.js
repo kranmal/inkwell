@@ -1,4 +1,5 @@
 // Templates, version history, document protection and mail merge.
+import { loadScript } from './docx.js';
 let api;
 const X = () => api.doc.x;
 const lock = (el) => { if (el.getAttribute('contenteditable') !== 'false') el.setAttribute('contenteditable', 'false'); };
@@ -174,6 +175,74 @@ function parseCsv(text) {
   if (cur !== '' || row.length) { row.push(cur); rows.push(row); }
   return rows.filter((r) => r.some((c) => c.trim() !== ''));
 }
+// Accepts CSV/TSV text or a JSON array of objects; returns rows (first row = field names).
+function tableFrom(text) {
+  const t = text.trim();
+  if (/^[\[{]/.test(t)) {
+    try {
+      let data = JSON.parse(t);
+      if (!Array.isArray(data)) data = Object.values(data).find(Array.isArray) || [data];
+      const cols = [...new Set(data.flatMap((o) => (o && typeof o === 'object' ? Object.keys(o) : [])))];
+      if (cols.length) return [cols, ...data.map((o) => cols.map((c) => (o && o[c] != null ? String(o[c]) : '')))];
+    } catch { /* fall through to CSV */ }
+  }
+  return parseCsv(text);
+}
+// Reads the first sheet of an .xlsx: shared strings, inline strings and numbers.
+async function xlsxRows(buf) {
+  const JSZip = await loadScript('vendor/jszip.min.js', 'JSZip');
+  const zip = await JSZip.loadAsync(buf);
+  const xml = async (n) => { const f = zip.file(n); return f ? new DOMParser().parseFromString(await f.async('string'), 'application/xml') : null; };
+  const shared = [];
+  const sst = await xml('xl/sharedStrings.xml');
+  if (sst) for (const si of sst.getElementsByTagName('si')) shared.push([...si.getElementsByTagName('t')].map((t) => t.textContent).join(''));
+  const wb = await xml('xl/workbook.xml'), rels = await xml('xl/_rels/workbook.xml.rels');
+  let path = 'xl/worksheets/sheet1.xml';
+  if (wb && rels) {
+    const sh = wb.getElementsByTagName('sheet')[0];
+    const rid = sh && (sh.getAttribute('r:id') || sh.getAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships', 'id'));
+    const rel = [...rels.getElementsByTagName('Relationship')].find((r) => r.getAttribute('Id') === rid);
+    if (rel) path = 'xl/' + rel.getAttribute('Target').replace(/^\/?(xl\/)?/, '');
+  }
+  const sheet = await xml(path);
+  if (!sheet) throw new Error('No sheet');
+  const col = (ref) => ref.replace(/\d+/g, '').split('').reduce((n, c) => n * 26 + c.charCodeAt(0) - 64, 0) - 1;
+  const rows = [];
+  for (const r of sheet.getElementsByTagName('row')) {
+    const row = [];
+    for (const c of r.getElementsByTagName('c')) {
+      const t = c.getAttribute('t'), v = c.getElementsByTagName('v')[0];
+      let val = '';
+      if (t === 's' && v) val = shared[Number(v.textContent)] || '';
+      else if (t === 'inlineStr') val = [...c.getElementsByTagName('t')].map((x) => x.textContent).join('');
+      else if (v) val = v.textContent;
+      row[col(c.getAttribute('r') || 'A1')] = val;
+    }
+    rows.push(Array.from(row, (x) => x || ''));
+  }
+  return rows.filter((r) => r.some((c) => String(c).trim() !== ''));
+}
+function setRecipients(rows) {
+  if (rows.length < 2 || !rows[0].every((c) => String(c).trim())) { api.toast('Needs a header row with names, then at least one recipient.'); return false; }
+  const cols = rows[0].map((c) => String(c).trim());
+  X().merge = { cols, rows: rows.slice(1).map((r) => cols.map((_, i) => String(r[i] || '').trim())), i: 0, on: false };
+  syncMerge(); api.changed();
+  api.toast(`${X().merge.rows.length} recipients loaded.`);
+  return true;
+}
+function mergeFile() {
+  const inp = document.createElement('input');
+  inp.type = 'file'; inp.accept = '.csv,.tsv,.txt,.json,.xlsx';
+  inp.addEventListener('change', async () => {
+    const f = inp.files[0];
+    if (!f) return;
+    try {
+      const ext = (f.name.split('.').pop() || '').toLowerCase();
+      setRecipients(ext === 'xlsx' ? await xlsxRows(await f.arrayBuffer()) : tableFrom(await f.text()));
+    } catch (err) { console.error(err); api.toast('Sorry, that file could not be read.'); }
+  });
+  inp.click();
+}
 const M = () => X().merge || null;
 async function recipients() {
   const m = M();
@@ -182,12 +251,7 @@ async function recipients() {
     { id: 'csv', label: 'Paste your list. The first row holds the field names.', type: 'textarea', rows: 8, value: m ? [m.cols, ...m.rows].map((r) => r.map((c) => (/[",\n]/.test(c) ? `"${c.replace(/"/g, '""')}"` : c)).join(',')).join('\n') : sample },
   ], { ok: 'Use this list', wide: true, note: 'Copy from Excel or Sheets and paste, or type comma-separated lines. Stored with this document only.' });
   if (!v) return;
-  const rows = parseCsv(v.csv);
-  if (rows.length < 2 || !rows[0].every((c) => c.trim())) { api.toast('Needs a header row with names, then at least one recipient.'); return; }
-  const cols = rows[0].map((c) => c.trim());
-  X().merge = { cols, rows: rows.slice(1).map((r) => cols.map((_, i) => (r[i] || '').trim())), i: 0, on: false };
-  syncMerge(); api.changed();
-  api.toast(`${X().merge.rows.length} recipients loaded.`);
+  setRecipients(tableFrom(v.csv));
 }
 async function insertField() {
   const m = M();
@@ -260,6 +324,7 @@ export function init(a) {
   api.cmd('versions', openVersions);
   api.cmd('protect', protect);
   api.cmd('mmRecipients', recipients);
+  api.cmd('mmFile', mergeFile);
   api.cmd('mmField', insertField);
   api.cmd('mmPreview', mmPreview);
   api.cmd('mmPrev', () => mmStep(-1));
