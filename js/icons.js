@@ -43,6 +43,18 @@ export const ICONS = {
   trash: 'M3 6h18 M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6 M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2',
   x: 'M18 6L6 18 M6 6l12 12',
   check: 'M20 6L9 17l-5-5',
+  comment: 'M21 12a8 8 0 0 1-8 8H7l-4 3v-6.5A8 8 0 0 1 3 12a8 8 0 0 1 8-8h2a8 8 0 0 1 8 8z',
+  track: 'M12 20h9 M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z',
+  shapes: 'M3 13h8v8H3z M17.5 21a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z M12 3l4.5 7.5h-9z',
+  chart: 'M4 20V10 M10 20V4 M16 20v-7 M21 20H3',
+  textBox: 'M3 5h18v14H3z M8 9h8 M12 9v7',
+  footnote: 'M4 19h10 M4 6l5 9 M9 6l-5 9 M16 5l3-1v7',
+  toc: 'M4 6h10 M4 12h10 M4 18h10 M19 6h1 M19 12h1 M19 18h1',
+  header: 'M5 3h14v18H5z M8 7h8 M8 17h3',
+  merge: 'M3 5h18v14H3z M8 12h8 M10 9l-3 3 3 3 M14 9l3 3-3 3',
+  split: 'M3 5h18v14H3z M12 5v14 M7 12h2 M15 12h2',
+  palette: 'M12 3a9 9 0 1 0 0 18c1.2 0 2-.9 2-2 0-1.4-1-1.6-1-2.7 0-.8.7-1.3 1.5-1.3H17a4 4 0 0 0 4-4c0-4.4-4-8-9-8z M7.5 12h.01 M9.5 8h.01 M14.5 7.5h.01',
+  borders: 'M3 3h18v18H3z M3 12h18 M12 3v18',
   arrowLeft: 'M19 12H5 M12 19l-7-7 7-7',
 };
 

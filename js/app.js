@@ -4,6 +4,12 @@ import { store } from './store.js';
 import { blocksOf, toRange } from './textmap.js';
 import * as proof from './proof.js';
 import { exportDocx, loadScript } from './docx.js';
+import * as pagesMod from './pages.js';
+import * as tablesMod from './tables.js';
+import * as refsMod from './refs.js';
+import * as reviewMod from './review.js';
+import * as objectsMod from './objects.js';
+import * as stylesMod from './styles.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -37,7 +43,7 @@ const BLOCK = 'p,h1,h2,h3,h4,h5,h6,li,blockquote,pre,td,th';
 
 // ---------- state ----------
 const sysLang = /^en-(GB|AU|NZ|IE|ZA|IN)/i.test(navigator.language || '') ? 'en_GB' : 'en_US';
-const prefs = Object.assign({ dark: null, zoom: 100, lang: sysLang, proofOn: true, lastId: null, nav: false }, (() => {
+const prefs = Object.assign({ dark: null, zoom: 100, lang: sysLang, proofOn: true, lastId: null, nav: false, author: 'You' }, (() => {
   try { return JSON.parse(localStorage.getItem('inkwell.prefs') || '{}'); } catch { return {}; }
 })());
 const savePrefs = () => { try { localStorage.setItem('inkwell.prefs', JSON.stringify(prefs)); } catch { /* private mode */ } };
@@ -51,7 +57,11 @@ let lastColor = '#e5484d', lastHilite = '#fff59d';
 const newDoc = (title = 'Untitled document') => ({
   id: 'd' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7), title, theme: 'modern',
   page: { size: sysLang === 'en_US' ? 'Letter' : 'A4', orient: 'portrait', margins: 'normal', cols: 1 }, created: Date.now(), updated: Date.now(),
+  hf: null, styles: null, themeCustom: null, track: false,
 });
+
+// Feature modules (pages, tables, refs, review, objects, styles) plug in here.
+const ext = { cmds: {}, meta: [], afterLayout: [], load: [], refresh: [], side: [], paste: [] };
 
 // ---------- small helpers ----------
 let toastTimer;
@@ -181,10 +191,15 @@ function changed(skipHistory) {
 }
 function meta() {
   if (!editor.firstElementChild) { editor.innerHTML = '<p><br></p>'; caretIn(editor.firstElementChild); }
-  const last = editor.lastElementChild;
-  if (last && (/^(TABLE|HR|PRE)$/.test(last.tagName) || last.classList.contains('page-break'))) {
-    const p = document.createElement('p'); p.append(document.createElement('br')); editor.append(p);
+  let last = editor.lastElementChild;
+  while (last && last.matches('ol.footnotes,ol.endnotes')) last = last.previousElementSibling;
+  if (!last || /^(TABLE|HR|PRE|FIGURE)$/.test(last.tagName) || last.matches('.page-break,.toc,.textbox')) {
+    const p = emptyP();
+    if (last) last.after(p); else editor.prepend(p);
   }
+  for (const f of ext.meta) f();
+  pagesMod.layout();
+  for (const f of ext.afterLayout) f();
   updateStats();
   if (!$('#nav-pane').hidden) renderOutline();
   if (findOpen()) findRun(true);
@@ -206,6 +221,10 @@ function pageDims() {
   const [t, r, b, l] = MARGINS[doc.page.margins] || MARGINS.normal;
   return { w, h, landscape: doc.page.orient === 'landscape', m: { t, r, b, l }, cols: doc.page.cols || 1 };
 }
+function pageCss() {
+  const d = pageDims();
+  return `@page { size: ${d.w}mm ${d.h}mm; margin: ${d.m.t}mm ${d.m.r}mm ${d.m.b}mm ${d.m.l}mm; ${pagesMod.marginBoxes()} }${pagesMod.firstPageCss()}`;
+}
 function applyPage() {
   const d = pageDims();
   const set = (k, v) => page.style.setProperty(k, v + 'mm');
@@ -214,22 +233,24 @@ function applyPage() {
   editor.style.columnGap = d.cols > 1 ? '12.5mm' : '';
   let st = $('#print-page');
   if (!st) { st = document.createElement('style'); st.id = 'print-page'; document.head.append(st); }
-  st.textContent = `@page { size: ${d.w}mm ${d.h}mm; margin: ${d.m.t}mm ${d.m.r}mm ${d.m.b}mm ${d.m.l}mm; }`;
+  st.textContent = pageCss();
   for (const [menu, key] of [['m-margins', 'margins'], ['m-orient', 'orient'], ['m-size', 'size'], ['m-cols', 'cols']]) {
     $$('button', $('#' + menu)).forEach((b) => b.classList.toggle('on', b.dataset.val === String(doc.page[key])));
   }
+  pagesMod.layout();
   updateStats(); placeImgBox();
 }
 function applyTheme() {
   if (doc.theme && doc.theme !== 'modern') editor.dataset.theme = doc.theme; else delete editor.dataset.theme;
   $$('.theme-card').forEach((c) => c.classList.toggle('on', c.dataset.val === (doc.theme || 'modern')));
+  stylesMod.apply();
 }
 function zoomTo(z) {
   prefs.zoom = Math.max(50, Math.min(200, Math.round(z / 5) * 5));
   page.style.zoom = prefs.zoom === 100 ? '' : zoomF();
   $$('.zoom-label').forEach((l) => { l.textContent = prefs.zoom + '%'; });
   $('#zoom-range').value = prefs.zoom;
-  savePrefs(); placeImgBox();
+  savePrefs(); pagesMod.layout(); placeImgBox();
 }
 function applyDark() {
   const dark = prefs.dark == null ? matchMedia('(prefers-color-scheme: dark)').matches : prefs.dark;
@@ -246,15 +267,12 @@ function applyLang() {
 // ---------- stats, outline ----------
 const WORDS = /[\p{L}\p{N}]+(?:['’-][\p{L}\p{N}]+)*/gu;
 function pageInfo() {
-  const d = pageDims();
-  const per = (d.h - d.m.t - d.m.b) * MM;
-  const er = editor.getBoundingClientRect();
-  const total = Math.max(1, Math.ceil((er.height / zoomF() - 2) / per));
+  const total = pagesMod.count();
   let cur = 1;
   const s = getSelection();
   if (s.rangeCount && inEditor(s.anchorNode)) {
     const r = s.getRangeAt(0).getClientRects()[0] || selEl().getBoundingClientRect();
-    cur = Math.min(total, Math.max(1, Math.floor((r.top - er.top) / zoomF() / per) + 1));
+    cur = pagesMod.pageAt(r.top);
   }
   return { cur, total };
 }
@@ -285,6 +303,7 @@ function styleOf(b) {
   if (/^H[1-3]$/.test(t)) return t.toLowerCase();
   if (t === 'PRE') return 'code';
   for (const k of ['nospace', 'title', 'subtitle', 'quote']) if (b.classList.contains(STYLES[k][1])) return k;
+  for (const c of b.classList) if (c.startsWith('cs-') && STYLES[c]) return c;
   return 'normal';
 }
 function applyStyle(val) {
@@ -467,48 +486,6 @@ function tableCtx() {
   if (!cell || !editor.contains(cell)) return null;
   return { cell, row: cell.parentElement, table: cell.closest('table'), idx: cell.cellIndex };
 }
-function tableCmd(cmd) {
-  restore();
-  const c = tableCtx();
-  if (!c) return;
-  commit();
-  const mk = (tag) => { const x = document.createElement(tag); x.append(document.createElement('br')); return x; };
-  const rows = [...c.table.rows];
-  if (cmd === 'rowAbove' || cmd === 'rowBelow') {
-    const tr = document.createElement('tr');
-    for (let i = 0; i < c.row.cells.length; i++) tr.append(mk('td'));
-    if (cmd === 'rowAbove') c.row.before(tr); else c.row.after(tr);
-    caretIn(tr.cells[Math.min(c.idx, tr.cells.length - 1)]);
-  } else if (cmd === 'colLeft' || cmd === 'colRight') {
-    for (const r of rows) {
-      const ref = r.cells[Math.min(c.idx, r.cells.length - 1)];
-      const x = mk(ref.tagName.toLowerCase());
-      if (cmd === 'colLeft') ref.before(x); else ref.after(x);
-    }
-  } else if (cmd === 'headerRow') {
-    const first = rows[0], toHead = first.cells[0].tagName === 'TD';
-    keepSel(() => {
-      for (const cell of [...first.cells]) {
-        const x = document.createElement(toHead ? 'th' : 'td');
-        while (cell.firstChild) x.append(cell.firstChild);
-        cell.replaceWith(x);
-      }
-    });
-  } else if (cmd === 'delRow') {
-    const near = c.row.nextElementSibling || c.row.previousElementSibling;
-    c.row.remove();
-    if (near) caretIn(near.cells[Math.min(c.idx, near.cells.length - 1)]); else removeTable(c.table);
-  } else if (cmd === 'delCol') {
-    for (const r of rows) if (r.cells[c.idx]) r.cells[c.idx].remove();
-    const row = c.table.rows[0];
-    if (!row || !row.cells.length) removeTable(c.table); else caretIn(c.row.cells[Math.max(0, c.idx - 1)] || row.cells[0]);
-  } else if (cmd === 'delTable') removeTable(c.table);
-  done();
-}
-function removeTable(t) {
-  const p = emptyP();
-  t.replaceWith(p); caretIn(p);
-}
 function fileToDataUrl(file) {
   return new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = rej; fr.readAsDataURL(file); });
 }
@@ -539,11 +516,13 @@ async function insertImageFile(file, range) {
 
 // images: select, resize, wrap
 function selectImg(img) { selImg = img; placeImgBox(); }
+const objKind = (el) => (el.tagName === 'IMG' ? 'img' : el.classList.contains('shape') ? 'shape' : el.classList.contains('chart') ? 'chart' : 'textbox');
 function placeImgBox() {
   const box = $('#img-box');
   if (!selImg || !selImg.isConnected) { selImg = null; box.hidden = true; return; }
   const r = selImg.getBoundingClientRect(), c = canvas.getBoundingClientRect();
   box.hidden = false;
+  box.dataset.kind = objKind(selImg);
   Object.assign(box.style, { left: r.left - c.left + canvas.scrollLeft + 'px', top: r.top - c.top + canvas.scrollTop + 'px', width: r.width + 'px', height: r.height + 'px' });
 }
 function imgAlign(mode) {
@@ -559,10 +538,16 @@ function imgAlign(mode) {
 $('#img-handle').addEventListener('pointerdown', (e) => {
   if (!selImg) return;
   e.preventDefault();
-  const h = e.currentTarget, x0 = e.clientX, w0 = selImg.getBoundingClientRect().width / zoomF();
+  const h = e.currentTarget, x0 = e.clientX, y0 = e.clientY, r0 = selImg.getBoundingClientRect(), w0 = r0.width / zoomF(), h0 = r0.height / zoomF();
+  const kind = objKind(selImg), both = kind === 'shape' && !selImg.classList.contains('shape-line');
   h.setPointerCapture(e.pointerId);
   commit();
-  const move = (ev) => { selImg.style.width = Math.max(24, Math.round(w0 + (ev.clientX - x0) / zoomF())) + 'px'; selImg.style.height = ''; placeImgBox(); };
+  const move = (ev) => {
+    selImg.style.width = Math.max(24, Math.round(w0 + (ev.clientX - x0) / zoomF())) + 'px';
+    if (both) selImg.style.height = Math.max(12, Math.round(h0 + (ev.clientY - y0) / zoomF())) + 'px';
+    else if (kind === 'img') selImg.style.height = '';
+    placeImgBox();
+  };
   const up = () => { h.removeEventListener('pointermove', move); h.removeEventListener('pointerup', up); done(); };
   h.addEventListener('pointermove', move); h.addEventListener('pointerup', up);
 });
@@ -682,6 +667,8 @@ function showSide(which) {
   $('#side-pane').hidden = !which;
   $('#proof-pane').hidden = which !== 'proof';
   $('#find-pane').hidden = which !== 'find';
+  $('#review-pane').hidden = which !== 'review';
+  for (const f of ext.side) f(which);
   if (which !== 'find') clearFind();
   if (which === 'proof') { proofSig = null; renderProof(); }
   if (which === 'find') {
@@ -855,8 +842,12 @@ function readAloud() {
 }
 
 // ---------- cleaning imported / pasted HTML ----------
-const KEEP_CLASS = new Set(['doc-title', 'doc-subtitle', 'no-spacing', 'quote', 'page-break']);
-const STYLE_FULL = ['font-weight', 'font-style', 'text-decoration-line', 'color', 'background-color', 'font-size', 'font-family', 'text-align', 'line-height', 'margin-left', 'margin-right', 'margin-top', 'margin-bottom', 'vertical-align', 'width', 'float'];
+const KEEP_CLASS = new Set(['doc-title', 'doc-subtitle', 'no-spacing', 'quote', 'page-break', 'fn-ref', 'en-ref', 'footnotes', 'endnotes',
+  'toc', 'toc-title', 'toc-empty', 'toc-1', 'toc-2', 'toc-3', 'toc-t', 'toc-pg', 'cm', 'tc', 'shape', 'shape-rect', 'shape-round', 'shape-ellipse',
+  'shape-tri', 'shape-arrow', 'shape-line', 'shape-star', 'textbox', 'chart', 'tb-none', 'tb-outer', 'tb-horizontal', 'tb-striped']);
+const KEEP_ATTR = new Set(['alt', 'colspan', 'rowspan', 'data-fn', 'data-cm', 'data-author', 'data-time', 'data-text', 'data-resolved', 'data-ch', 'data-chart', 'data-i']);
+const LOCKED = '.page-break,.fn-ref,.en-ref,.toc,.shape,.chart';
+const STYLE_FULL = ['font-weight', 'font-style', 'text-decoration-line', 'color', 'background-color', 'font-size', 'font-family', 'text-align', 'line-height', 'margin-left', 'margin-right', 'margin-top', 'margin-bottom', 'vertical-align', 'width', 'height', 'float'];
 const STYLE_PASTE = ['font-weight', 'font-style', 'text-decoration-line', 'color', 'background-color', 'text-align', 'vertical-align'];
 const BLOCK_TAGS = new Set(['P', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'LI', 'UL', 'OL', 'TABLE', 'TBODY', 'THEAD', 'TFOOT', 'TR', 'TD', 'TH', 'DIV', 'BLOCKQUOTE', 'PRE', 'HR', 'BODY', 'SECTION', 'ARTICLE', 'BR']);
 const NOISE = /^(normal|400|start|left|baseline|none|rgb\(0, 0, 0\)|rgb\(255, 255, 255\)|rgba\(0, 0, 0, 0\)|transparent|black|white)$/i;
@@ -874,18 +865,18 @@ function clean(html, { full = false, collapse = true } = {}) {
       if (!v || /url\(|expression|var\(/i.test(v) || (!full && NOISE.test(v))) continue;
       css += `${p}:${v};`;
     }
-    if (el.tagName === 'IMG' && el.style.display === 'block') css += 'display:block;';
-    const cls = [...el.classList].filter((c) => KEEP_CLASS.has(c)).join(' ');
+    if (el.style.display === 'block' && (el.tagName === 'IMG' || el.matches('.shape,.chart,.textbox'))) css += 'display:block;';
+    const cls = [...el.classList].filter((c) => KEEP_CLASS.has(c) || /^cs-[a-z0-9]+$/.test(c)).join(' ');
     for (const a of [...el.attributes]) {
       const n = a.name, v = a.value.trim();
       if (n === 'href' && /^(https?:|mailto:|#)/i.test(v)) continue;
       if (n === 'src' && el.tagName === 'IMG' && /^(data:image\/|https?:|blob:)/i.test(v)) continue;
-      if (n === 'alt' || n === 'colspan' || n === 'rowspan') continue;
+      if (KEEP_ATTR.has(n)) continue;
       el.removeAttribute(n);
     }
     if (css) el.setAttribute('style', css);
     if (cls) el.className = cls;
-    if (el.classList.contains('page-break')) el.setAttribute('contenteditable', 'false');
+    if (el.matches(LOCKED)) el.setAttribute('contenteditable', 'false');
   }
   if (collapse) {
     const w = d.createTreeWalker(d.body, NodeFilter.SHOW_TEXT), kill = [];
@@ -913,12 +904,14 @@ function textToHtml(t, md) {
 
 // ---------- documents ----------
 function setDoc(d, html) {
-  doc = { id: d.id, title: d.title, theme: d.theme || 'modern', page: { ...newDoc().page, ...(d.page || {}) }, created: d.created || Date.now(), updated: d.updated || Date.now() };
+  doc = { id: d.id, title: d.title, theme: d.theme || 'modern', page: { ...newDoc().page, ...(d.page || {}) }, created: d.created || Date.now(), updated: d.updated || Date.now(),
+    hf: d.hf || null, styles: d.styles || null, themeCustom: d.themeCustom || null, track: !!d.track };
   editor.innerHTML = html || '<p><br></p>';
   if (!editor.firstElementChild) editor.innerHTML = `<p>${editor.innerHTML || '<br>'}</p>`;
   $('#title').value = doc.title; document.title = doc.title + ' · Inkwell';
   H.stack = []; H.idx = -1; commit();
   saved = null; selectImg(null); clearFind();
+  for (const f of ext.load) f();
   applyPage(); applyTheme();
   canvas.scrollTop = 0;
   setSave('Saved');
@@ -957,7 +950,12 @@ async function openFile(file) {
       const d = new DOMParser().parseFromString(text, 'text/html');
       const own = !!d.querySelector('meta[name="generator"][content="Inkwell"]');
       const root = (own && d.querySelector('.doc')) || d.body;
-      await createDoc(d.title || name, clean(root.innerHTML, { full: true, collapse: !own }), own && root.dataset.theme ? { theme: root.dataset.theme } : {});
+      const extra = {};
+      if (own) {
+        if (root.dataset.theme) extra.theme = root.dataset.theme;
+        for (const k of ['hf', 'styles', 'themeCustom']) { try { if (root.dataset[k]) extra[k] = JSON.parse(root.dataset[k]); } catch { /* ignore bad data */ } }
+      }
+      await createDoc(d.title || name, clean(root.innerHTML, { full: true, collapse: !own }), extra);
     } else {
       await createDoc(name, textToHtml(await file.text(), ext === 'md'));
     }
@@ -1000,17 +998,25 @@ function toggleBackstage(on = $('#backstage').hidden) {
 }
 
 // ---------- export ----------
+const docxOpts = () => ({ title: doc.title, page: pageDims(), hf: pagesMod.hf(), styles: doc.styles, track: doc.track, author: prefs.author });
 async function saveDocx() {
   toast('Building Word document…');
   try {
-    download(await exportDocx(editor, { title: doc.title, page: pageDims() }), fileBase() + '.docx');
+    download(await exportDocx(editor, docxOpts()), fileBase() + '.docx');
     toast('Word document downloaded.');
   } catch (err) { console.error(err); toast('Sorry, the Word export failed.'); }
+}
+function dataAttrs() {
+  let out = '';
+  const vars = stylesMod.rootStyle();
+  if (vars) out += ` style="${esc(vars)}"`;
+  for (const k of ['hf', 'styles', 'themeCustom']) if (doc[k]) out += ` data-${k === 'themeCustom' ? 'theme-custom' : k}="${esc(JSON.stringify(doc[k]))}"`;
+  return out;
 }
 async function buildHtml() {
   const css = await fetch('css/doc.css').then((r) => r.text()).catch(() => '');
   const d = pageDims();
-  const html = `<!doctype html>\n<html lang="${editor.lang}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="generator" content="Inkwell"><title>${esc(doc.title)}</title><style>${css}\nbody{margin:0;background:#f1f1ee}.doc{box-sizing:border-box;max-width:${d.w}mm;margin:24px auto;padding:${d.m.t}mm ${d.m.r}mm ${d.m.b}mm ${d.m.l}mm;background:#fff;white-space:pre-wrap;overflow-wrap:break-word}.doc .page-break::after{display:none}@media print{body{background:none}.doc{margin:0;padding:0;max-width:none}}</style></head><body><div class="doc"${doc.theme !== 'modern' ? ` data-theme="${doc.theme}"` : ''}>${editor.innerHTML}</div></body></html>`;
+  const html = `<!doctype html>\n<html lang="${editor.lang}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="generator" content="Inkwell"><title>${esc(doc.title)}</title><style>${css}\nbody{margin:0;background:#f1f1ee}.doc{box-sizing:border-box;max-width:${d.w}mm;margin:24px auto;padding:${d.m.t}mm ${d.m.r}mm ${d.m.b}mm ${d.m.l}mm;background:#fff;white-space:pre-wrap;overflow-wrap:break-word}.doc .page-break::after{display:none}@media print{body{background:none}.doc{margin:0;padding:0;max-width:none}}\n${stylesMod.css()}\n${pageCss()}</style></head><body><div class="doc"${doc.theme !== 'modern' ? ` data-theme="${doc.theme}"` : ''}${dataAttrs()}>${editor.innerHTML}</div></body></html>`;
   return new Blob([html], { type: 'text/html' });
 }
 async function saveHtml() { download(await buildHtml(), fileBase() + '.html'); }
@@ -1027,7 +1033,7 @@ let fileHandle = null, fileDocId = null, noPicker = false;
 async function blobFor(name) {
   if (/\.html?$/i.test(name)) return buildHtml();
   if (/\.(txt|md)$/i.test(name)) return new Blob([editor.innerText], { type: 'text/plain' });
-  return exportDocx(editor, { title: doc.title, page: pageDims() });
+  return exportDocx(editor, docxOpts());
 }
 async function saveToDevice(saveAs) {
   $('#backstage').hidden = true;
@@ -1107,9 +1113,8 @@ function run(cmd, val, el) {
     case 'date': exec('insertText', new Date().toLocaleDateString(prefs.lang.replace('_', '-'), { day: 'numeric', month: 'long', year: 'numeric' })); break;
     case 'symbol': exec('insertText', val); break;
     case 'table': { const [r, c] = val.split('x').map(Number); insertTable(r, c); break; }
-    case 'rowAbove': case 'rowBelow': case 'colLeft': case 'colRight': case 'headerRow': case 'delRow': case 'delCol': case 'delTable': tableCmd(cmd); break;
     case 'imgAlign': imgAlign(val); break;
-    case 'imgDelete': if (selImg) { commit(); selImg.remove(); selectImg(null); done(); } break;
+    case 'imgDelete': if (selImg) { commit(); const nx = selImg.nextElementSibling; selImg.remove(); selectImg(null); if (nx && nx.isContentEditable) caretIn(nx); done(); } break;
     case 'theme': doc.theme = val; applyTheme(); changed(true); break;
     case 'margins': doc.page.margins = val; applyPage(); changed(true); break;
     case 'orient': doc.page.orient = val; applyPage(); changed(true); break;
@@ -1134,7 +1139,7 @@ function run(cmd, val, el) {
     case 'saveDocx': saveDocx(); break;
     case 'saveHtml': saveHtml(); break;
     case 'saveTxt': download(new Blob([editor.innerText], { type: 'text/plain' }), fileBase() + '.txt'); break;
-    default: console.warn('Unknown command', cmd, el);
+    default: if (ext.cmds[cmd]) ext.cmds[cmd](val, el); else console.warn('Unknown command', cmd, el);
   }
 }
 
@@ -1175,6 +1180,7 @@ function refreshUI() {
     }
     const p = pageInfo();
     $('#st-page').textContent = `Page ${p.cur} of ${p.total}`;
+    for (const f of ext.refresh) f();
   });
 }
 
@@ -1235,13 +1241,14 @@ editor.addEventListener('mousedown', () => { pendingSize = null; });
 editor.addEventListener('mouseup', () => { if (painter && !getSelection().isCollapsed) setTimeout(paint, 0); });
 editor.addEventListener('click', (e) => {
   const t = e.target;
-  if (t.tagName === 'IMG') {
-    selectImg(t);
-    const r = document.createRange(); r.selectNode(t);
+  const obj = t.tagName === 'IMG' ? t : t.closest && t.closest('.shape,.chart');
+  if (obj) {
+    selectImg(obj);
+    const r = document.createRange(); r.selectNode(obj);
     const s = getSelection(); s.removeAllRanges(); s.addRange(r);
     return;
   }
-  selectImg(null);
+  selectImg((t.closest && t.closest('.textbox')) || null);
   if (t.tagName === 'HR' || (t.classList && t.classList.contains('page-break'))) {
     const r = document.createRange(); r.selectNode(t);
     const s = getSelection(); s.removeAllRanges(); s.addRange(r);
@@ -1250,8 +1257,9 @@ editor.addEventListener('click', (e) => {
   if (a && (e.metaKey || e.ctrlKey) && /^(https?:|mailto:)/i.test(a.getAttribute('href'))) { e.preventDefault(); window.open(a.href, '_blank', 'noopener'); }
 });
 editor.addEventListener('keydown', (e) => {
-  if (selImg && (e.key === 'Backspace' || e.key === 'Delete')) { e.preventDefault(); return run('imgDelete'); }
-  if (selImg && !e.metaKey && !e.ctrlKey) selectImg(null);
+  const box = selImg && selImg.classList.contains('textbox');
+  if (selImg && !box && (e.key === 'Backspace' || e.key === 'Delete')) { e.preventDefault(); return run('imgDelete'); }
+  if (selImg && !box && !e.metaKey && !e.ctrlKey) selectImg(null);
   if (e.key.startsWith('Arrow')) pendingSize = null;
   if (e.key === 'Tab' && !e.metaKey && !e.ctrlKey && !e.altKey) {
     e.preventDefault();
@@ -1260,7 +1268,7 @@ editor.addEventListener('keydown', (e) => {
     if (c) {
       const cells = $$('td,th', c.table);
       let next = cells[cells.indexOf(c.cell) + (e.shiftKey ? -1 : 1)];
-      if (!next && !e.shiftKey) { tableCmd('rowBelow'); next = $$('td,th', c.table)[cells.length]; }
+      if (!next && !e.shiftKey) { ext.cmds.rowBelow(); next = $$('td,th', c.table)[cells.length]; }
       if (next) { const r = document.createRange(); r.selectNodeContents(next); if (next.textContent === '') r.collapse(true); const s = getSelection(); s.removeAllRanges(); s.addRange(r); }
     } else if (b && b.closest('li')) exec(e.shiftKey ? 'outdent' : 'indent');
     else if (!e.shiftKey) exec('insertText', '\t');
@@ -1290,6 +1298,7 @@ editor.addEventListener('paste', (e) => {
   const imgs = [...cd.files].filter((f) => /^image\//.test(f.type));
   const html = cd.getData('text/html');
   e.preventDefault();
+  if (ext.paste.some((f) => f(cd))) return;
   if (imgs.length && !html) { imgs.reduce((p, f) => p.then(() => insertImageFile(f)), Promise.resolve()); return; }
   commit();
   if (html) document.execCommand('insertHTML', false, clean(html.replace(/<!--(Start|End)Fragment-->/g, '')));
@@ -1307,7 +1316,8 @@ editor.addEventListener('drop', (e) => {
   files.reduce((p, f) => p.then(() => insertImageFile(f, r && inEditor(r.startContainer) ? r : null)), Promise.resolve());
 });
 canvas.addEventListener('mousedown', (e) => { if (e.target === canvas || e.target === page) { selectImg(null); } });
-window.addEventListener('resize', () => { closeMenus(); placeImgBox(); });
+window.addEventListener('resize', () => { closeMenus(); pagesMod.layout(); placeImgBox(); });
+editor.addEventListener('load', () => { pagesMod.layout(); placeImgBox(); }, true);
 
 document.addEventListener('keydown', (e) => {
   const mod = isMac ? e.metaKey : e.ctrlKey;
@@ -1376,7 +1386,17 @@ const WELCOME = [
   '<p><br></p>',
 ].join('');
 
+const api = {
+  editor, page, canvas, $, $$, esc, ic, MM, COLORS, FONTS, STYLES, prefs, ext,
+  begin, done, commit, changed, restore, insertBlock, caretIn, curBlock, selEl, selBlocks, keepSel, toast, pageDims, zoomF,
+  closeMenus, placeMenu, showSide, savePrefs, topOf, emptyP, selectImg, placeImgBox, applyPage, applyTheme, refreshUI, inEditor, run,
+  get doc() { return doc; }, get selImg() { return selImg; }, get saved() { return saved; },
+  cmd(name, fn) { ext.cmds[name] = fn; },
+  on(evt, fn) { ext[evt].push(fn); },
+};
+
 async function start() {
+  for (const m of [pagesMod, tablesMod, refsMod, reviewMod, objectsMod, stylesMod]) m.init(api);
   buildUI();
   applyDark(); applyLang();
   document.execCommand('defaultParagraphSeparator', false, 'p');
@@ -1396,6 +1416,7 @@ async function start() {
     if (html) save();
   }
   zoomTo(prefs.zoom);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { pagesMod.layout(); placeImgBox(); });
   matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyDark);
 }
 start();

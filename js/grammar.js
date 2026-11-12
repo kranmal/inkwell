@@ -123,12 +123,122 @@ const WORDY = [
   ['in close proximity to', 'near'], ['on a daily basis', 'daily'], ['on a regular basis', 'regularly'],
   ['the reason is because', 'the reason is that'], ['first and foremost', 'first'],
   ['in the near future', 'soon'], ['a number of', 'several', 'some'], ['prior to', 'before'],
-  ['subsequent to', 'after'], ['utilize', 'use'], ['utilise', 'use'], ['utilizes', 'uses'], ['utilises', 'uses'],
+  ['subsequent to', 'after'], ['at all times', 'always'], ['in the event of', 'if'],
+  ['despite the fact that', 'although'], ['owing to the fact that', 'because'], ['in a timely manner', 'promptly', 'on time'],
+  ['take into consideration', 'consider'], ['make a decision', 'decide'], ['come to a conclusion', 'conclude'],
+  ['give consideration to', 'consider'], ['until such time as', 'until'], ['with the exception of', 'except for'],
+  ['in the vicinity of', 'near'], ['whether or not', 'whether'], ['as to whether', 'whether'], ['for the most part', 'mostly'],
+  ['final outcome', 'outcome'], ['future plans', 'plans'], ['unexpected surprise', 'surprise'], ['revert back', 'revert'],
+  ['return back', 'return'], ['repeat again', 'repeat'], ['join together', 'join'], ['basic fundamentals', 'fundamentals'],
+  ['added bonus', 'bonus'], ['exact same', 'same'], ['ATM machine', 'ATM'], ['PIN number', 'PIN'],
+  ['off of', 'off'], ['try and', 'try to'], ['anyways', 'anyway'], ['utilize', 'use'], ['utilise', 'use'], ['utilizes', 'uses'], ['utilises', 'uses'],
 ];
 for (const [phrase, ...alts] of WORDY) {
   rule('wordy:' + phrase, 'style', new RegExp(`\\b${phrase.replace(/ /g, '\\s+')}\\b`, 'gi'), (m) => whole(m, 'This can be said more simply', ...alts));
 }
 rule('can-not', 'style', /\bcan\s+not\b(?!\s+only)/gi, (m) => whole(m, 'Usually written as one word', 'cannot'));
+
+/* ---- commonly confused words ---- */
+rule('whos-whose', 'grammar', /\bwho['’]s\s+(book|car|house|turn|fault|idea|name|job|phone|responsibility|side|work|life|father|mother|parents|children|family)\b/gi, (m) => ({ s: m.index, e: m.index + 5, msg: 'Use “whose” to show ownership', sugg: [matchCase(m[0], 'whose')] }));
+rule('whose-whos', 'grammar', /\bwhose\s+(going|coming|been|there|here|ready|next|responsible|in charge)\b/gi, (m) => ({ s: m.index, e: m.index + 5, msg: 'Use “who’s” for “who is” or “who has”', sugg: [matchCase(m[0], 'who’s')] }));
+rule('affect-noun', 'grammar', /\b(the|an|no|any|side|positive|negative|little|big|huge|major|lasting|same|opposite)\s+affects?\b(?!\s+(the|my|your|our|their|his|her|its|me|us|you|them|how)\b)/gi, (m) => {
+  const w = /affects?$/i.exec(m[0])[0];
+  return { s: m.index + m[0].length - w.length, e: m.index + m[0].length, msg: 'The noun is “effect”', sugg: [w.replace(/^a/i, 'e')] };
+});
+rule('effect-verb', 'grammar', /\b(will|would|can|could|may|might|to|not|doesn't|didn't|won't|don't)\s+effect\s+(the|my|your|our|their|his|her|its|how|what|us|me|you|them|everyone)\b/gi, (m) => {
+  const at = m.index + m[1].length + m[0].slice(m[1].length).indexOf('effect');
+  return { s: at, e: at + 6, msg: 'The verb is usually “affect”', sugg: ['affect'] };
+});
+rule('loose-lose', 'grammar', /\b(to|will|would|might|could|can|may|don't|didn't|won't|not|never)\s+loose\b(?!\s+(ends?|change|cannon|fit|fitting)\b)/gi, (m) => ({ s: m.index + m[0].length - 5, e: m.index + m[0].length, msg: '“Lose” means to misplace or not win', sugg: ['lose'] }));
+rule('loose-lose2', 'grammar', /\bloos(e|ing)\s+(weight|money|track|sight|interest|hope|control|touch|time|faith|patience|focus)\b/gi, (m) => whole(m, '“Lose” means to misplace or not win', `los${m[1].toLowerCase() === 'e' ? 'e' : 'ing'} ${m[2]}`));
+rule('accept-except', 'grammar', /\bexcept\s+(the|this|that|your|my|our|his|her|their|an|full)\s+(offer|invitation|apology|terms|job|award|responsibility|challenge|payment|proposal|gift)\b/gi, (m) => ({ s: m.index, e: m.index + 6, msg: '“Accept” means to receive or agree to', sugg: [matchCase(m[0], 'accept')] }));
+rule('advise-noun', 'grammar', /\b(my|your|his|her|their|our|some|any|good|bad|great|this|that|legal|medical|financial)\s+advise\b/gi, (m) => ({ s: m.index + m[0].length - 6, e: m.index + m[0].length, msg: 'The noun is “advice”', sugg: ['advice'] }));
+rule('advice-verb', 'grammar', /\b(to|will|would|can|could|should|please|I|we|they)\s+advice\s+(you|him|her|them|us|me|that|against)\b/g, (m) => {
+  const at = m.index + m[0].indexOf('advice');
+  return { s: at, e: at + 6, msg: 'The verb is “advise”', sugg: ['advise'] };
+});
+rule('weather-whether', 'grammar', /\bweather\s+(or\s+not|you|he|she|we|they|I|it|to)\b/gi, (m) => ({ s: m.index, e: m.index + 7, msg: 'Use “whether” for a choice or doubt', sugg: [matchCase(m[0], 'whether')] }));
+rule('its-apos', 'grammar', /\bits['’](?![A-Za-z])/gi, (m) => whole(m, '“Its’” is not a word', 'its', 'it’s'));
+const EGGCORNS = [
+  ['sneak peak', 'sneak peek'], ['peaked my interest', 'piqued my interest'], ['peaked my curiosity', 'piqued my curiosity'],
+  ['could care less', 'couldn’t care less'], ['per say', 'per se'], ['bare with me', 'bear with me'],
+  ['one in the same', 'one and the same'], ['case and point', 'case in point'], ['baited breath', 'bated breath'],
+  ['tow the line', 'toe the line'], ['nip it in the butt', 'nip it in the bud'], ['mute point', 'moot point'],
+  ['escape goat', 'scapegoat'], ['by in large', 'by and large'], ['wreck havoc', 'wreak havoc'],
+  ['free reign', 'free rein'], ['slight of hand', 'sleight of hand'], ['deep seeded', 'deep-seated'],
+  ['do diligence', 'due diligence'], ['extract revenge', 'exact revenge'], ['supposably', 'supposedly'],
+  ['comprised of', 'composed of', 'made up of'], ['between you and I', 'between you and me'],
+  ['aswell', 'as well'], ['infact', 'in fact'], ['incase', 'in case'], ['atleast', 'at least'], ['eachother', 'each other'],
+  ['noone', 'no one'], ['everytime', 'every time'], ['thankyou', 'thank you'], ['and etc', 'etc'], ['ect', 'etc'],
+];
+for (const [phrase, ...alts] of EGGCORNS) {
+  rule('phrase:' + phrase, 'grammar', new RegExp(`\\b${phrase.replace(/ /g, '\\s+')}\\b`, 'gi'), (m) => whole(m, 'Commonly confused phrase', ...alts));
+}
+rule('everyday', 'grammar', /\b(an|my|your|our|their|the|for)\s+every\s+day\s+(life|use|task|tasks|items|objects|routine|language|clothes|activities|problems|things)\b/gi, (m) => {
+  const at = m.index + m[1].length + m[0].slice(m[1].length).search(/every/i);
+  const len = /every\s+day/i.exec(m[0])[0].length;
+  return { s: at, e: at + len, msg: 'As an adjective, “everyday” is one word', sugg: ['everyday'] };
+});
+
+/* ---- verbs and agreement ---- */
+const PARTICIPLE = { went: 'gone', ate: 'eaten', saw: 'seen', did: 'done', came: 'come', took: 'taken', wrote: 'written', drove: 'driven', spoke: 'spoken', broke: 'broken', chose: 'chosen', gave: 'given', ran: 'run', began: 'begun', drank: 'drunk', sang: 'sung', swam: 'swum', knew: 'known', grew: 'grown', threw: 'thrown', flew: 'flown', forgot: 'forgotten', fell: 'fallen', rode: 'ridden', wore: 'worn', tore: 'torn', stole: 'stolen', froze: 'frozen', became: 'become', shook: 'shaken' };
+rule('have-past', 'grammar', new RegExp(`\\b(have|has|had|having|[A-Za-z]+['’]ve)\\s+((?:not|never|already|just|also)\\s+)?(${Object.keys(PARTICIPLE).join('|')})\\b`, 'gi'), (m) => {
+  const w = m[3];
+  return { s: m.index + m[0].length - w.length, e: m.index + m[0].length, msg: `After “${m[1].toLowerCase()}”, use “${PARTICIPLE[w.toLowerCase()]}”`, sugg: [PARTICIPLE[w.toLowerCase()]] };
+});
+const HAVE_PREV = /^(have|has|had|having|be|been|being|is|are|was|were|am|get|gets|got|and|or)$|['’](ve|d|s|re)$/;
+rule('seen-done', 'grammar', /\b(I|we|they|he|she)\s+(seen|done|gone)\b/g, (m, text) => {
+  if (HAVE_PREV.test(prevWord(text, m.index))) return null;
+  const fix = { seen: 'saw', done: 'did', gone: 'went' }[m[2]];
+  return { s: m.index + m[0].length - m[2].length, e: m.index + m[0].length, msg: `Use “${fix}”, or add “have” before “${m[2]}”`, sugg: [fix, `have ${m[2]}`] };
+});
+rule('i-doesnt', 'grammar', /\b(I|we|they|you)\s+doesn['’]t\b/gi, (m) => whole(m, 'Subject and verb do not agree', `${m[1]} don’t`));
+rule('there-is-many', 'grammar', /\bthere(\s+is|['’]s|\s+was)\s+(many|several|two|three|four|five|multiple|numerous|a\s+few|a\s+couple\s+of|lots\s+of)\b/gi, (m) => {
+  const verb = /was/i.test(m[1]) ? 'were' : 'are';
+  return { s: m.index, e: m.index + 5 + m[1].length, msg: 'Use a plural verb with a plural subject', sugg: [matchCase(m[0], `there ${verb}`)] };
+});
+rule('everyone-are', 'grammar', /\b(everyone|everybody|someone|somebody|anyone|anybody|nobody|no one|each of (?:them|us|you))\s+(are|were|have)\b/gi, (m, text) => {
+  if (AUX.test(prevWord(text, m.index))) return null;
+  const fix = { are: 'is', were: 'was', have: 'has' }[m[2].toLowerCase()];
+  return { s: m.index + m[0].length - m[2].length, e: m.index + m[0].length, msg: `“${m[1]}” takes a singular verb`, sugg: [fix] };
+});
+rule('these-kind', 'grammar', /\b(these|those)\s+(kind|type|sort)\s+of\b/gi, (m) => whole(m, 'The number does not match', `${m[1].toLowerCase() === 'these' ? 'this' : 'that'} ${m[2]} of`, `${m[1]} ${m[2]}s of`));
+const COUNT = 'people|items|things|cars|students|problems|errors|mistakes|words|pages|users|customers|days|hours|options|books|friends|questions|ideas|times|files|emails|jobs|houses|children';
+rule('much-many', 'grammar', new RegExp(`\\b(too|so|how|as|not)?\\s*much\\s+(${COUNT})\\b`, 'gi'), (m) => {
+  const at = m.index + m[0].search(/much/i);
+  return { s: at, e: at + 4, msg: 'Use “many” with things you can count', sugg: [matchCase(m[0].slice(at - m.index), 'many')] };
+});
+rule('amount-number', 'grammar', new RegExp(`\\bamount\\s+of\\s+(${COUNT})\\b`, 'gi'), (m) => ({ s: m.index, e: m.index + 6, msg: 'Use “number” with things you can count', sugg: [matchCase(m[0], 'number')] }));
+const NEG_FIX = { nothing: 'anything', nobody: 'anybody', nowhere: 'anywhere', 'no one': 'anyone', none: 'any' };
+rule('double-negative', 'grammar', /\b(don['’]t|doesn['’]t|didn['’]t|can['’]t|couldn['’]t|won['’]t|wouldn['’]t|haven['’]t|hasn['’]t|isn['’]t|aren['’]t|ain['’]t|never)\s+([a-z]+\s+)?(nothing|nobody|nowhere|no one|none)\b/gi, (m) => {
+  const w = m[3];
+  return { s: m.index + m[0].length - w.length, e: m.index + m[0].length, msg: 'Double negative', sugg: [NEG_FIX[w.toLowerCase()]] };
+});
+rule('me-and', 'grammar', /(^|[.!?]\s+)Me\s+and\s+(my\s+[a-z]+|[A-Z][a-z]+|him|her|them)\b/g, (m) => {
+  const s = m.index + m[1].length;
+  const other = m[2].replace(/^him$/, 'he').replace(/^her$/, 'she').replace(/^them$/, 'they');
+  return { s, e: m.index + m[0].length, msg: 'Use “I” as the subject, and put yourself last', sugg: [`${other.charAt(0).toUpperCase() + other.slice(1)} and I`] };
+});
+rule('to-who', 'style', /\b(to|with|for|from)\s+who\b(?!\s+(is|was|are|were|has|had)\b)/gi, (m) => ({ s: m.index + m[0].length - 3, e: m.index + m[0].length, msg: 'In formal writing, use “whom” after a preposition', sugg: ['whom'] }));
+
+/* ---- punctuation and capitals ---- */
+rule('intro-comma', 'grammar', /(^|[.!?]\s+)(However|Therefore|Moreover|Furthermore|Nevertheless|Consequently|Unfortunately|Fortunately|Additionally|Meanwhile|For example|For instance|In addition|In conclusion|In fact|On the other hand|As a result|First of all)\s+(?=[A-Za-z])(?!(much|many|long|hard|you|we|it|they|he|she|I)\b)/g, (m) => {
+  const s = m.index + m[1].length;
+  return { s, e: s + m[2].length, msg: 'Add a comma after an introductory phrase', sugg: [m[2] + ','] };
+});
+rule('question-mark', 'grammar', /(^|[.!?]\s+)(Do|Does|Did|Can|Could|Would|Will|Are|Is)\s+(you|we|they|I|he|she|it|there)\s[^.!?,;:\n]*(\.)(?=\s|$)/g, (m) => {
+  const at = m.index + m[0].length - 1;
+  return { s: at, e: at + 1, msg: 'This reads as a question', sugg: ['?'] };
+});
+rule('day-month', 'grammar', /\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday|january|february|april|june|july|september|october|november|december)\b/g, (m, text) => {
+  if (looksLikeAddress(tokenAround(text, m.index))) return null;
+  return { s: m.index, e: m.index + m[0].length, msg: 'Days and months start with a capital letter', sugg: [m[0].charAt(0).toUpperCase() + m[0].slice(1)] };
+});
+
+/* ---- clarity ---- */
+rule('passive', 'style', /\b(is|are|was|were|be|been|being)\s+([a-z]+ed|written|taken|given|made|done|seen|known|shown|built|sent|held|found|told|kept|left|paid|sold|chosen|broken)\s+by\b/gi, (m) => whole(m, 'Passive voice. Consider naming who did it first.'));
+const STRONGER = { big: ['huge', 'enormous'], small: ['tiny'], tired: ['exhausted'], important: ['crucial', 'essential'], good: ['excellent', 'great'], bad: ['terrible', 'awful'], happy: ['delighted', 'thrilled'], sad: ['miserable'], angry: ['furious'], hungry: ['starving'], cold: ['freezing'], hot: ['scorching'], scared: ['terrified'], funny: ['hilarious'], smart: ['brilliant'], tasty: ['delicious'], dirty: ['filthy'], clean: ['spotless'], old: ['ancient'], pretty: ['beautiful'] };
+rule('very', 'style', new RegExp(`\\b(very|really)\\s+(${Object.keys(STRONGER).join('|')})\\b`, 'gi'), (m) => whole(m, 'A stronger word may work better', ...STRONGER[m[2].toLowerCase()]));
 
 export function checkGrammar(text) {
   const out = [];

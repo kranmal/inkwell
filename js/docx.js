@@ -1,4 +1,6 @@
 // Writes a real .docx (WordprocessingML in a zip) from the editor DOM.
+import { gridOf } from './tables.js';
+import { toPng } from './objects.js';
 const NS = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"';
 const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const TW_MM = 56.6929;           // twips per mm
@@ -80,10 +82,19 @@ async function prepareImages(root, maxPx) {
       map.set(img, { bytes, ext, w, h: (w * nh) / nw, n: ++n });
     } catch { /* cross-origin or broken image: leave it out */ }
   }
+  // Shapes and charts travel as pictures.
+  for (const el of root.querySelectorAll('.chart, .shape')) {
+    try {
+      const d = await toPng(el);
+      if (!d) continue;
+      const w = Math.min(d.w, maxPx);
+      map.set(el, { bytes: d.bytes, ext: 'png', w, h: (w * d.h) / d.w, n: ++n });
+    } catch { /* leave it out */ }
+  }
   return map;
 }
 
-export async function exportDocx(root, { title = 'Document', page }) {
+export async function exportDocx(root, { title = 'Document', page, hf = null, styles: docStyles = null, track = false, author = '' }) {
   const JSZip = await loadScript('vendor/jszip.min.js', 'JSZip');
   const contentMm = page.w - page.m.l - page.m.r;
   const contentTw = Math.round(contentMm * TW_MM);
@@ -95,6 +106,20 @@ export async function exportDocx(root, { title = 'Document', page }) {
     rels.push({ type, target, external });
     return 'rId' + (rels.length + 2);    // rId1 styles, rId2 numbering
   };
+
+  // ----- notes, comments and tracked changes -----
+  let plain = false;            // inside notes/comments: no relationships (links, pictures)
+  let annId = 0;
+  const iso = (t) => { const d = new Date(Number(t) || Date.now()); return (isNaN(d) ? new Date() : d).toISOString().replace(/\.\d+Z$/, 'Z'); };
+  const who = (el) => esc(el.dataset.author || author || 'Author');
+  const notes = { fn: [], en: [] };
+  const noteLi = (kind, id) => [...root.querySelectorAll(`ol.${kind === 'fn' ? 'footnotes' : 'endnotes'} > li`)].find((li) => li.dataset.fn === id);
+  const comments = [];
+  const cmSeen = new Map();     // comment id -> { n, left }
+  for (const sp of root.querySelectorAll('span.cm')) {
+    const c = cmSeen.get(sp.dataset.cm);
+    if (c) c.left++; else cmSeen.set(sp.dataset.cm, { n: null, left: 1 });
+  }
 
   // ----- runs -----
   function rPr(f) {
@@ -118,14 +143,14 @@ export async function exportDocx(root, { title = 'Document', page }) {
     for (const part of text.split(/(\t|\n)/)) {
       if (part === '\t') body += '<w:tab/>';
       else if (part === '\n') body += '<w:br/>';
-      else if (part) body += `<w:t xml:space="preserve">${esc(part)}</w:t>`;
+      else if (part) body += f.del ? `<w:delText xml:space="preserve">${esc(part)}</w:delText>` : `<w:t xml:space="preserve">${esc(part)}</w:t>`;
     }
     return `<w:r>${rPr(f)}${body}</w:r>`;
   }
 
   function imageRun(img) {
     const d = images.get(img);
-    if (!d) return '';
+    if (!d || plain) return '';
     const id = rel('http://schemas.openxmlformats.org/officeDocument/2006/relationships/image', `media/image${d.n}.${d.ext}`);
     const cx = Math.round(d.w * EMU_PX), cy = Math.round(d.h * EMU_PX);
     return `<w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="${cx}" cy="${cy}"/><wp:docPr id="${d.n}" name="Picture ${d.n}" descr="${esc(img.alt || '')}"/><wp:cNvGraphicFramePr><a:graphicFrameLocks xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" noChangeAspect="1"/></wp:cNvGraphicFramePr><a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:nvPicPr><pic:cNvPr id="${d.n}" name="image${d.n}.${d.ext}"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="${id}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>`;
@@ -164,10 +189,44 @@ export async function exportDocx(root, { title = 'Document', page }) {
     if (node.nodeType === 3) return textRun(node.data, f);
     if (node.nodeType !== 1) return '';
     const t = node.tagName;
-    if (t === 'BR') return '<w:r><w:br/></w:r>';
+    if (t === 'BR') {
+      // A break that ends its block is only the browser's placeholder, not a real line break.
+      for (let n = node; n && n !== root; n = n.parentNode) {
+        if (n.nextSibling) return /^(P|H[1-6]|LI|TD|TH|DIV|BLOCKQUOTE|PRE|UL|OL|TABLE)$/.test(n.nextSibling.nodeName) ? '' : '<w:r><w:br/></w:r>';
+        if (/^(P|H[1-6]|LI|TD|TH|DIV|BLOCKQUOTE|PRE)$/.test(n.parentNode.nodeName)) return '';
+      }
+      return '';
+    }
     if (t === 'IMG') return imageRun(node);
     if (t === 'UL' || t === 'OL' || t === 'TABLE') return '';
+    const cl = node.classList;
+    if (cl.contains('shape') || cl.contains('chart')) return imageRun(node);
+    if (t === 'SUP' && (cl.contains('fn-ref') || cl.contains('en-ref'))) {
+      if (plain) return '';
+      const kind = cl.contains('fn-ref') ? 'fn' : 'en';
+      const li = noteLi(kind, node.dataset.fn);
+      if (!li) return '';
+      notes[kind].push(li);
+      return `<w:r><w:rPr><w:vertAlign w:val="superscript"/></w:rPr><w:${kind === 'fn' ? 'footnote' : 'endnote'}Reference w:id="${notes[kind].length}"/></w:r>`;
+    }
+    if (cl.contains('tc') && (t === 'INS' || t === 'DEL') && !plain) {
+      const tag = t === 'INS' ? 'ins' : 'del';
+      const runs = kids(node, t === 'DEL' ? { ...f, del: true } : f);
+      return runs ? `<w:${tag} w:id="${++annId}" w:author="${who(node)}" w:date="${iso(node.dataset.time)}">${runs}</w:${tag}>` : '';
+    }
+    if (t === 'SPAN' && cl.contains('cm') && !plain) {
+      const c = cmSeen.get(node.dataset.cm);
+      let pre = '', post = '';
+      if (c.n === null) {
+        c.n = ++annId;
+        comments.push({ n: c.n, author: who(node), date: iso(node.dataset.time), text: node.dataset.text || '' });
+        pre = `<w:commentRangeStart w:id="${c.n}"/>`;
+      }
+      if (--c.left === 0) post = `<w:commentRangeEnd w:id="${c.n}"/><w:r><w:commentReference w:id="${c.n}"/></w:r>`;
+      return pre + kids(node, f) + post;
+    }
     let g = fmt(node, f);
+    if (plain && t === 'A') return kids(node, g);
     if (t === 'A' && /^(https?:|mailto:)/i.test(node.getAttribute('href') || '')) {
       g = { ...g, link: true };
       const id = rel('http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink', node.getAttribute('href'), true);
@@ -190,6 +249,8 @@ export async function exportDocx(root, { title = 'Document', page }) {
     else if (cl.contains('quote') || t === 'BLOCKQUOTE' || env.quote) style = 'Quote';
     else if (cl.contains('no-spacing')) style = 'NoSpacing';
     else if (t === 'PRE') style = 'Code';
+    const cs = [...(el.classList || [])].find((c) => /^cs-/.test(c));
+    if (cs && customIds.has(cs.slice(3))) style = 'Custom' + cs.slice(3).replace(/[^A-Za-z0-9]/g, '');
     let x = style ? `<w:pStyle w:val="${style}"/>` : '';
     if (env.list) x += `<w:numPr><w:ilvl w:val="${Math.min(env.list.lvl, 8)}"/><w:numId w:val="${env.list.numId}"/></w:numPr>`;
     const sp = [];
@@ -229,28 +290,79 @@ export async function exportDocx(root, { title = 'Document', page }) {
   }
 
   function table(el) {
-    const rows = [...el.querySelectorAll('tr')].filter((r) => r.closest('table') === el);
-    if (!rows.length) return '';
-    const cols = Math.max(...rows.map((r) => [...r.cells].reduce((a, c) => a + (c.colSpan || 1), 0)));
-    const cw = Math.floor(contentTw / cols);
-    const border = (k) => `<w:${k} w:val="single" w:sz="4" w:space="0" w:color="BFBFBF"/>`;
-    let x = `<w:tbl><w:tblPr><w:tblW w:w="5000" w:type="pct"/><w:tblBorders>${['top', 'left', 'bottom', 'right', 'insideH', 'insideV'].map(border).join('')}</w:tblBorders><w:tblCellMar><w:top w:w="60" w:type="dxa"/><w:left w:w="100" w:type="dxa"/><w:bottom w:w="60" w:type="dxa"/><w:right w:w="100" w:type="dxa"/></w:tblCellMar></w:tblPr><w:tblGrid>${`<w:gridCol w:w="${cw}"/>`.repeat(cols)}</w:tblGrid>`;
-    for (const r of rows) {
-      x += '<w:tr>';
-      for (const c of r.cells) {
-        const span = c.colSpan || 1;
-        const head = c.tagName === 'TH';
-        let inner = hasBlockChild(c) ? blocks(c, { cell: true }) : para(c, {}, kids(c, head ? { b: true } : {}));
-        if (!/<\/w:p>$/.test(inner)) inner += '<w:p/>';
-        x += `<w:tc><w:tcPr><w:tcW w:w="${cw * span}" w:type="dxa"/>${span > 1 ? `<w:gridSpan w:val="${span}"/>` : ''}${head ? '<w:shd w:val="clear" w:color="auto" w:fill="F2F2F0"/>' : ''}</w:tcPr>${inner}</w:tc>`;
+    const g = gridOf(el);
+    if (!g.nRows || !g.nCols) return '';
+    const cl = el.classList;
+    const cols = [...el.querySelectorAll(':scope > colgroup > col')].map((c) => parseFloat(c.style.width));
+    const even = Math.floor(contentTw / g.nCols);
+    const cw = cols.length === g.nCols && cols.every((w) => w > 0)
+      ? cols.map((w) => Math.round((contentTw * w) / cols.reduce((x, y) => x + y, 0))) : Array(g.nCols).fill(even);
+    const on = (k) => `<w:${k} w:val="single" w:sz="4" w:space="0" w:color="BFBFBF"/>`;
+    const off = (k) => `<w:${k} w:val="nil"/>`;
+    const sides = ['top', 'left', 'bottom', 'right', 'insideH', 'insideV'];
+    const show = cl.contains('tb-none') || cl.contains('tb-striped') ? [] : cl.contains('tb-outer') ? ['top', 'left', 'bottom', 'right']
+      : cl.contains('tb-horizontal') ? ['top', 'bottom', 'insideH'] : sides;
+    let x = `<w:tbl><w:tblPr><w:tblW w:w="5000" w:type="pct"/><w:tblBorders>${sides.map((k) => (show.includes(k) ? on(k) : off(k))).join('')}</w:tblBorders><w:tblLayout w:type="fixed"/><w:tblCellMar><w:top w:w="60" w:type="dxa"/><w:left w:w="100" w:type="dxa"/><w:bottom w:w="60" w:type="dxa"/><w:right w:w="100" w:type="dxa"/></w:tblCellMar></w:tblPr><w:tblGrid>${cw.map((w) => `<w:gridCol w:w="${w}"/>`).join('')}</w:tblGrid>`;
+    for (let r = 0; r < g.nRows; r++) {
+      const tr = g.rows[r];
+      const headRow = tr.cells.length && [...tr.cells].every((c) => c.tagName === 'TH');
+      x += `<w:tr>${headRow && r === 0 ? '<w:trPr><w:tblHeader/></w:trPr>' : ''}`;
+      for (let c = 0; c < g.nCols; c++) {
+        const cell = g.grid[r][c];
+        if (!cell) { x += `<w:tc><w:tcPr><w:tcW w:w="${cw[c]}" w:type="dxa"/></w:tcPr><w:p/></w:tc>`; continue; }
+        const p = g.pos.get(cell);
+        if (p.c !== c) continue;
+        const width = cw.slice(c, c + p.cs).reduce((a2, b2) => a2 + b2, 0);
+        const head = cell.tagName === 'TH';
+        const fill = hex(cell.style.backgroundColor) || (head ? 'F2F2F0' : cl.contains('tb-striped') && tr.rowIndex % 2 === 1 ? 'F3F5F4' : null);
+        let pr = `<w:tcW w:w="${width}" w:type="dxa"/>`;
+        if (p.cs > 1) pr += `<w:gridSpan w:val="${p.cs}"/>`;
+        if (p.rs > 1) pr += p.r === r ? '<w:vMerge w:val="restart"/>' : '<w:vMerge/>';
+        if (fill) pr += `<w:shd w:val="clear" w:color="auto" w:fill="${fill}"/>`;
+        let inner = '<w:p/>';
+        if (p.r === r) {
+          inner = hasBlockChild(cell) ? blocks(cell, { cell: true }) : para(cell, {}, kids(cell, head ? { b: true } : {}));
+          if (!/<\/w:p>$/.test(inner)) inner += '<w:p/>';
+        }
+        x += `<w:tc><w:tcPr>${pr}</w:tcPr>${inner}</w:tc>`;
       }
       x += '</w:tr>';
     }
     return x + '</w:tbl>';
   }
 
+  function toc(el) {
+    const rows = [...el.querySelectorAll('[data-i]')];
+    const titleEl = el.querySelector('.toc-title');
+    let out = `<w:p><w:pPr><w:keepNext/><w:spacing w:before="240" w:after="120"/></w:pPr>${textRun(titleEl ? titleEl.textContent : 'Contents', { b: true, size: 14 })}</w:p>`;
+    if (!rows.length) return out;
+    const fld = (k) => `<w:r><w:fldChar w:fldCharType="${k}"/></w:r>`;
+    rows.forEach((row, i) => {
+      const lvl = Number(row.className.slice(-1)) || 1;
+      const t = row.querySelector('.toc-t'), pg = row.querySelector('.toc-pg');
+      out += `<w:p><w:pPr><w:tabs><w:tab w:val="right" w:leader="dot" w:pos="${contentTw}"/></w:tabs><w:spacing w:after="60"/><w:ind w:left="${(lvl - 1) * 280}"/></w:pPr>`
+        + (i === 0 ? fld('begin') + '<w:r><w:instrText xml:space="preserve"> TOC \\o "1-3" \\h \\z \\u </w:instrText></w:r>' + fld('separate') : '')
+        + textRun((t || row).textContent, {}) + '<w:r><w:tab/></w:r>' + textRun(pg ? pg.textContent : '', {})
+        + (i === rows.length - 1 ? fld('end') : '') + '</w:p>';
+    });
+    return out;
+  }
+
+  function textbox(el) {
+    const w = Math.min(contentTw, Math.round((parseFloat(el.style.width) || 260) * 15));
+    const b = (k) => `<w:${k} w:val="single" w:sz="6" w:space="0" w:color="9A9A9A"/>`;
+    let inner = blocks(el, { cell: true });
+    if (!/<\/w:p>$/.test(inner)) inner += '<w:p/>';
+    return `<w:tbl><w:tblPr><w:tblW w:w="${w}" w:type="dxa"/><w:tblBorders>${['top', 'left', 'bottom', 'right'].map(b).join('')}</w:tblBorders><w:tblCellMar><w:top w:w="100" w:type="dxa"/><w:left w:w="140" w:type="dxa"/><w:bottom w:w="100" w:type="dxa"/><w:right w:w="140" w:type="dxa"/></w:tblCellMar></w:tblPr><w:tblGrid><w:gridCol w:w="${w}"/></w:tblGrid><w:tr><w:tc><w:tcPr><w:tcW w:w="${w}" w:type="dxa"/></w:tcPr>${inner}</w:tc></w:tr></w:tbl><w:p><w:pPr><w:spacing w:after="0" w:line="120" w:lineRule="auto"/></w:pPr></w:p>`;
+  }
+
   function block(el, env) {
     const t = el.tagName;
+    const c0 = el.classList;
+    if (c0.contains('footnotes') || c0.contains('endnotes')) return '';
+    if (c0.contains('toc')) return toc(el);
+    if (c0.contains('chart')) return `<w:p><w:pPr><w:jc w:val="center"/></w:pPr>${imageRun(el)}</w:p>`;
+    if (c0.contains('textbox')) return textbox(el);
     if (t === 'UL' || t === 'OL') return list(el, env);
     if (t === 'TABLE') return table(el);
     if (t === 'HR') return '<w:p><w:pPr><w:pBdr><w:bottom w:val="single" w:sz="6" w:space="1" w:color="BFBFBF"/></w:pBdr></w:pPr></w:p>';
@@ -272,7 +384,54 @@ export async function exportDocx(root, { title = 'Document', page }) {
     return out;
   }
 
+  const custom = (docStyles && Array.isArray(docStyles.custom) ? docStyles.custom : []).filter((c) => c && c.id);
+  const customIds = new Set(custom.map((c) => String(c.id)));
+  const over = (docStyles && docStyles.overrides) || {};
   const body = blocks(root, {});
+
+  // Notes and comments are written after the body, which is where they are discovered.
+  plain = true;
+  const noteXml = (kind) => {
+    const tag = kind === 'fn' ? 'footnote' : 'endnote';
+    const sep = `<w:${tag} w:type="separator" w:id="-1"><w:p><w:pPr><w:spacing w:after="0" w:line="240" w:lineRule="auto"/></w:pPr><w:r><w:separator/></w:r></w:p></w:${tag}><w:${tag} w:type="continuationSeparator" w:id="0"><w:p><w:pPr><w:spacing w:after="0" w:line="240" w:lineRule="auto"/></w:pPr><w:r><w:continuationSeparator/></w:r></w:p></w:${tag}>`;
+    const items = notes[kind].map((li, i) => `<w:${tag} w:id="${i + 1}"><w:p><w:pPr><w:spacing w:after="0" w:line="240" w:lineRule="auto"/></w:pPr><w:r><w:rPr><w:vertAlign w:val="superscript"/></w:rPr><w:${tag}Ref/></w:r>${textRun(' ', { size: 10 })}${kids(li, { size: 10 })}</w:p></w:${tag}>`).join('');
+    return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:${tag}s ${NS}>${sep}${items}</w:${tag}s>`;
+  };
+  const footnotesXml = notes.fn.length ? noteXml('fn') : '';
+  const endnotesXml = notes.en.length ? noteXml('en') : '';
+  const initials = (n) => n.split(/\s+/).map((w) => w[0] || '').join('').slice(0, 3).toUpperCase();
+  const commentsXml = comments.length ? `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:comments ${NS}>${comments.map((c) => `<w:comment w:id="${c.n}" w:author="${c.author}" w:date="${c.date}" w:initials="${initials(c.author)}"><w:p>${textRun(c.text, {})}</w:p></w:comment>`).join('')}</w:comments>` : '';
+  plain = false;
+
+  // Header and footer: left, centre and right slots on one line.
+  const H = hf || {};
+  const field = (code) => `<w:r>${GREY}<w:fldChar w:fldCharType="begin"/></w:r><w:r>${GREY}<w:instrText xml:space="preserve"> ${code} </w:instrText></w:r><w:r>${GREY}<w:fldChar w:fldCharType="separate"/></w:r><w:r>${GREY}<w:t>1</w:t></w:r><w:r>${GREY}<w:fldChar w:fldCharType="end"/></w:r>`;
+  const GREY = '<w:rPr><w:color w:val="6B6B6B"/><w:sz w:val="18"/><w:szCs w:val="18"/></w:rPr>';
+  const txt = (t) => `<w:r>${GREY}<w:t xml:space="preserve">${esc(t)}</w:t></w:r>`;
+  const numRuns = () => (H.numFormat === 'page' ? txt('Page ') + field('PAGE') : H.numFormat === 'of' ? txt('Page ') + field('PAGE') + txt(' of ') + field('NUMPAGES') : field('PAGE'));
+  function zone(which) {
+    const slots = { left: [], center: [], right: [] };
+    const text = (H[which] || '').trim();
+    if (text) (slots[H[which + 'Align']] || slots.left).push(txt(text));
+    if (H.num && H.num !== 'none') {
+      const [z, a] = H.num.split('-');
+      if ((z === 'top') === (which === 'header') && slots[a]) slots[a].push(numRuns());
+    }
+    if (!slots.left.length && !slots.center.length && !slots.right.length) return '';
+    const join = (a) => a.join(txt(' · '));
+    const tag = which === 'header' ? 'hdr' : 'ftr';
+    return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:${tag} ${NS}><w:p><w:pPr><w:tabs><w:tab w:val="center" w:pos="${Math.round(contentTw / 2)}"/><w:tab w:val="right" w:pos="${contentTw}"/></w:tabs><w:spacing w:after="0" w:line="240" w:lineRule="auto"/></w:pPr>${join(slots.left)}<w:r><w:tab/></w:r>${join(slots.center)}<w:r><w:tab/></w:r>${join(slots.right)}</w:p></w:${tag}>`;
+  }
+  const headerXml = zone('header'), footerXml = zone('footer');
+  const RT = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/';
+  let sectRefs = '';
+  if (headerXml) sectRefs += `<w:headerReference w:type="default" r:id="${rel(RT + 'header', 'header1.xml')}"/>`;
+  if (footerXml) sectRefs += `<w:footerReference w:type="default" r:id="${rel(RT + 'footer', 'footer1.xml')}"/>`;
+  if (footnotesXml) rel(RT + 'footnotes', 'footnotes.xml');
+  if (endnotesXml) rel(RT + 'endnotes', 'endnotes.xml');
+  if (commentsXml) rel(RT + 'comments', 'comments.xml');
+  rel(RT + 'settings', 'settings.xml');
+  const settingsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:settings ${NS}>${track ? '<w:trackRevisions/>' : ''}${footnotesXml ? '<w:footnotePr><w:footnote w:id="-1"/><w:footnote w:id="0"/></w:footnotePr>' : ''}${endnotesXml ? '<w:endnotePr><w:endnote w:id="-1"/><w:endnote w:id="0"/></w:endnotePr>' : ''}</w:settings>`;
 
   // ----- package parts -----
   const cs = getComputedStyle(root);
@@ -282,13 +441,32 @@ export async function exportDocx(root, { title = 'Document', page }) {
   const accent = hex(cs.getPropertyValue('--doc-accent').trim()) || '0F766E';
   const baseHalf = Math.round((parseFloat(cs.fontSize) || 14.67) * 0.75 * 2);
 
-  const heading = (id, name, lvl, size) => `<w:style w:type="paragraph" w:styleId="${id}"><w:name w:val="${name}"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/><w:pPr><w:keepNext/><w:spacing w:before="360" w:after="120" w:line="288" w:lineRule="auto"/><w:outlineLvl w:val="${lvl}"/></w:pPr><w:rPr><w:rFonts w:ascii="${esc(headFont)}" w:hAnsi="${esc(headFont)}" w:cs="${esc(headFont)}"/><w:b/><w:color w:val="${headColor}"/><w:sz w:val="${size}"/><w:szCs w:val="${size}"/></w:rPr></w:style>`;
+  // One paragraph style from a set of defaults plus whatever the user changed in "Modify styles".
+  const okHex = (c) => (/^#[0-9a-f]{6}$/i.test(c || '') ? c.slice(1).toUpperCase() : null);
+  const n0 = (v) => { const n = parseFloat(v); return v !== '' && v != null && isFinite(n) && n >= 0 && n <= 200 ? n : null; };
+  function pstyle(id, name, d, o = {}, isDefault = false) {
+    const font = o.font ? fontName(o.font, d.font) : d.font;
+    const size = n0(o.size) || d.size;
+    const color = okHex(o.color) || d.color;
+    const bold = o.bold === 'bold' ? true : o.bold === 'normal' ? false : d.bold;
+    const italic = o.italic === 'italic' ? true : o.italic === 'normal' ? false : d.italic;
+    const before = n0(o.before) != null ? n0(o.before) * 20 : d.before, after = n0(o.after) != null ? n0(o.after) * 20 : d.after;
+    const jc = { left: 'left', center: 'center', right: 'right', justify: 'both' }[o.align];
+    const sp = [before != null ? `w:before="${Math.round(before)}"` : '', after != null ? `w:after="${Math.round(after)}"` : '', d.line ? `w:line="${d.line}" w:lineRule="auto"` : ''].filter(Boolean).join(' ');
+    const ppr = (d.keepNext ? '<w:keepNext/>' : '') + (d.pBdr || '') + (d.shd || '') + (sp ? `<w:spacing ${sp}/>` : '') + (d.ind ? `<w:ind w:left="${d.ind}"/>` : '') + (jc ? `<w:jc w:val="${jc}"/>` : '') + (d.outline != null ? `<w:outlineLvl w:val="${d.outline}"/>` : '');
+    const rpr = (font ? `<w:rFonts w:ascii="${esc(font)}" w:hAnsi="${esc(font)}" w:cs="${esc(font)}"/>` : '')
+      + (bold === true ? '<w:b/>' : bold === false && !isDefault ? '<w:b w:val="0"/>' : '') + (italic === true ? '<w:i/>' : italic === false && !isDefault ? '<w:i w:val="0"/>' : '')
+      + (color ? `<w:color w:val="${color}"/>` : '') + (size ? `<w:sz w:val="${Math.round(size * 2)}"/><w:szCs w:val="${Math.round(size * 2)}"/>` : '');
+    return `<w:style w:type="paragraph"${isDefault ? ' w:default="1"' : ''} w:styleId="${id}"><w:name w:val="${esc(name)}"/>${isDefault ? '' : '<w:basedOn w:val="Normal"/>'}${d.next ? '<w:next w:val="Normal"/>' : ''}<w:qFormat/>${ppr ? `<w:pPr>${ppr}</w:pPr>` : ''}${rpr ? `<w:rPr>${rpr}</w:rPr>` : ''}</w:style>`;
+  }
+  const hd = (lvl, size) => ({ font: headFont, bold: true, color: headColor, size, before: 360, after: 120, line: 288, keepNext: true, outline: lvl, next: true });
   const styles = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles ${NS}><w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="${esc(bodyFont)}" w:hAnsi="${esc(bodyFont)}" w:cs="${esc(bodyFont)}"/><w:sz w:val="${baseHalf}"/><w:szCs w:val="${baseHalf}"/><w:lang w:val="en-GB"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:spacing w:after="160" w:line="360" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults>`
-    + '<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/></w:style>'
-    + heading('Heading1', 'heading 1', 0, 40) + heading('Heading2', 'heading 2', 1, 30) + heading('Heading3', 'heading 3', 2, 25)
-    + `<w:style w:type="paragraph" w:styleId="Title"><w:name w:val="Title"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/><w:pPr><w:spacing w:after="80" w:line="264" w:lineRule="auto"/></w:pPr><w:rPr><w:rFonts w:ascii="${esc(headFont)}" w:hAnsi="${esc(headFont)}" w:cs="${esc(headFont)}"/><w:b/><w:color w:val="141414"/><w:sz w:val="60"/><w:szCs w:val="60"/></w:rPr></w:style>`
-    + `<w:style w:type="paragraph" w:styleId="Subtitle"><w:name w:val="Subtitle"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/><w:pPr><w:spacing w:after="360"/></w:pPr><w:rPr><w:rFonts w:ascii="${esc(headFont)}" w:hAnsi="${esc(headFont)}" w:cs="${esc(headFont)}"/><w:color w:val="6B6B6B"/><w:sz w:val="28"/><w:szCs w:val="28"/></w:rPr></w:style>`
-    + `<w:style w:type="paragraph" w:styleId="Quote"><w:name w:val="Quote"/><w:basedOn w:val="Normal"/><w:qFormat/><w:pPr><w:pBdr><w:left w:val="single" w:sz="16" w:space="12" w:color="${accent}"/></w:pBdr><w:spacing w:before="200" w:after="200"/><w:ind w:left="600"/></w:pPr><w:rPr><w:i/><w:color w:val="444444"/></w:rPr></w:style>`
+    + pstyle('Normal', 'Normal', {}, over.normal, true)
+    + pstyle('Heading1', 'heading 1', hd(0, 20), over.h1) + pstyle('Heading2', 'heading 2', hd(1, 15), over.h2) + pstyle('Heading3', 'heading 3', hd(2, 12.5), over.h3)
+    + pstyle('Title', 'Title', { font: headFont, bold: true, color: '141414', size: 30, after: 80, line: 264, next: true }, over.title)
+    + pstyle('Subtitle', 'Subtitle', { font: headFont, color: '6B6B6B', size: 14, after: 360, next: true }, over.subtitle)
+    + pstyle('Quote', 'Quote', { italic: true, color: '444444', before: 200, after: 200, ind: 600, pBdr: `<w:pBdr><w:left w:val="single" w:sz="16" w:space="12" w:color="${accent}"/></w:pBdr>` }, over.quote)
+    + custom.map((c) => pstyle('Custom' + String(c.id).replace(/[^A-Za-z0-9]/g, ''), c.name || 'Custom style', {}, c.props || {})).join('')
     + '<w:style w:type="paragraph" w:styleId="NoSpacing"><w:name w:val="No Spacing"/><w:basedOn w:val="Normal"/><w:qFormat/><w:pPr><w:spacing w:after="0" w:line="240" w:lineRule="auto"/></w:pPr></w:style>'
     + '<w:style w:type="paragraph" w:styleId="Code"><w:name w:val="Code"/><w:basedOn w:val="Normal"/><w:qFormat/><w:pPr><w:shd w:val="clear" w:color="auto" w:fill="F4F4F2"/><w:spacing w:after="160" w:line="276" w:lineRule="auto"/></w:pPr><w:rPr><w:rFonts w:ascii="Consolas" w:hAnsi="Consolas" w:cs="Consolas"/><w:sz w:val="19"/><w:szCs w:val="19"/></w:rPr></w:style>'
     + `<w:style w:type="character" w:styleId="Hyperlink"><w:name w:val="Hyperlink"/><w:rPr><w:color w:val="${accent}"/><w:u w:val="single"/></w:rPr></w:style>`
@@ -299,20 +477,28 @@ export async function exportDocx(root, { title = 'Document', page }) {
   const numbering = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:numbering ${NS}><w:abstractNum w:abstractNumId="1"><w:multiLevelType w:val="hybridMultilevel"/>${lvls(false)}</w:abstractNum><w:abstractNum w:abstractNumId="2"><w:multiLevelType w:val="hybridMultilevel"/>${lvls(true)}</w:abstractNum><w:num w:numId="1"><w:abstractNumId w:val="1"/></w:num>${nums.map((a, i) => `<w:num w:numId="${i + 2}"><w:abstractNumId w:val="${a}"/><w:lvlOverride w:ilvl="0"><w:startOverride w:val="1"/></w:lvlOverride></w:num>`).join('')}</w:numbering>`;
 
   const tw = (mm) => Math.round(mm * TW_MM);
-  const sect = `<w:sectPr><w:pgSz w:w="${tw(page.w)}" w:h="${tw(page.h)}"${page.landscape ? ' w:orient="landscape"' : ''}/><w:pgMar w:top="${tw(page.m.t)}" w:right="${tw(page.m.r)}" w:bottom="${tw(page.m.b)}" w:left="${tw(page.m.l)}" w:header="708" w:footer="708" w:gutter="0"/><w:cols w:num="${page.cols || 1}" w:space="708"/></w:sectPr>`;
+  const sect = `<w:sectPr>${sectRefs}<w:pgSz w:w="${tw(page.w)}" w:h="${tw(page.h)}"${page.landscape ? ' w:orient="landscape"' : ''}/><w:pgMar w:top="${tw(page.m.t)}" w:right="${tw(page.m.r)}" w:bottom="${tw(page.m.b)}" w:left="${tw(page.m.l)}" w:header="708" w:footer="708" w:gutter="0"/><w:cols w:num="${page.cols || 1}" w:space="708"/>${H.firstDiff && sectRefs ? '<w:titlePg/>' : ''}</w:sectPr>`;
   const documentXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document ${NS}><w:body>${body || '<w:p/>'}${sect}</w:body></w:document>`;
 
   const R = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
   const docRels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="${R}/styles" Target="styles.xml"/><Relationship Id="rId2" Type="${R}/numbering" Target="numbering.xml"/>${rels.map((r, i) => `<Relationship Id="rId${i + 3}" Type="${r.type}" Target="${esc(r.target)}"${r.external ? ' TargetMode="External"' : ''}/>`).join('')}</Relationships>`;
   const now = new Date().toISOString().replace(/\.\d+Z$/, 'Z');
 
+  const part = (on, file, kind = file) => (on ? `<Override PartName="/word/${file}.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.${kind}+xml"/>` : '');
   const zip = new JSZip();
-  zip.file('[Content_Types].xml', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="png" ContentType="image/png"/><Default Extension="jpeg" ContentType="image/jpeg"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/><Override PartName="/word/numbering.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml"/><Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/></Types>');
+  zip.file('[Content_Types].xml', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="png" ContentType="image/png"/><Default Extension="jpeg" ContentType="image/jpeg"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/><Override PartName="/word/numbering.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml"/><Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>'
+    + part(true, 'settings') + part(headerXml, 'header1', 'header') + part(footerXml, 'footer1', 'footer') + part(footnotesXml, 'footnotes') + part(endnotesXml, 'endnotes') + part(commentsXml, 'comments') + '</Types>');
   zip.file('_rels/.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="${R}/officeDocument" Target="word/document.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/></Relationships>`);
   zip.file('docProps/core.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><dc:title>${esc(title)}</dc:title><dc:creator>Inkwell</dc:creator><dcterms:created xsi:type="dcterms:W3CDTF">${now}</dcterms:created><dcterms:modified xsi:type="dcterms:W3CDTF">${now}</dcterms:modified></cp:coreProperties>`);
   zip.file('word/document.xml', documentXml);
   zip.file('word/styles.xml', styles);
   zip.file('word/numbering.xml', numbering);
+  zip.file('word/settings.xml', settingsXml);
+  if (headerXml) zip.file('word/header1.xml', headerXml);
+  if (footerXml) zip.file('word/footer1.xml', footerXml);
+  if (footnotesXml) zip.file('word/footnotes.xml', footnotesXml);
+  if (endnotesXml) zip.file('word/endnotes.xml', endnotesXml);
+  if (commentsXml) zip.file('word/comments.xml', commentsXml);
   zip.file('word/_rels/document.xml.rels', docRels);
   for (const d of images.values()) zip.file(`word/media/image${d.n}.${d.ext}`, d.bytes);
   return zip.generateAsync({ type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', compression: 'DEFLATE' });

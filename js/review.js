@@ -1,0 +1,316 @@
+// Comments and track changes, with a review pane listing both.
+let api;
+let pending = null;      // range waiting for a new comment
+let editing = null;      // comment id being edited
+let items = [];          // what the list currently shows
+let sig = '';
+const uid = () => 'c' + Date.now().toString(36).slice(-4) + Math.random().toString(36).slice(2, 6);
+const author = () => (api.prefs.author || 'You').trim() || 'You';
+const when = (t) => { const d = new Date(Number(t)); return isNaN(d) ? '' : d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }); };
+const clip = (s, n = 90) => { s = s.replace(/\s+/g, ' ').trim(); return s.length > n ? s.slice(0, n - 1) + '…' : s; };
+const paneOpen = () => !api.$('#side-pane').hidden && !api.$('#review-pane').hidden;
+const STRUCT = /^(UL|OL|TABLE|TBODY|THEAD|TFOOT|TR|COLGROUP)$/;
+
+function textNodes(range) {
+  const root = range.commonAncestorContainer;
+  if (root.nodeType === 3) return [root];
+  const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const out = [];
+  let n;
+  while ((n = w.nextNode())) {
+    if (!range.intersectsNode(n) || !n.data.length) continue;
+    const p = n.parentElement;
+    if (!p || p === api.editor || STRUCT.test(p.tagName) || p.closest('[contenteditable="false"]')) continue;
+    out.push(n);
+  }
+  return out;
+}
+// Splits the text nodes at the range edges and returns the pieces that lie inside it.
+function pieces(range) {
+  const { startContainer: sc, startOffset: so, endContainer: ec, endOffset: eo } = range;
+  const out = [];
+  for (let n of textNodes(range)) {
+    const s = n === sc ? so : 0, e = n === ec ? eo : n.length;
+    if (e <= s) continue;
+    if (e < n.length) n.splitText(e);
+    if (s > 0) n = n.splitText(s);
+    out.push(n);
+  }
+  return out;
+}
+const unwrap = (el) => { const p = el.parentNode; el.replaceWith(...el.childNodes); if (p) p.normalize(); };
+function fixEmpty(block) {
+  if (block && block.isConnected && !block.textContent && !block.querySelector('br,img,.shape')) block.append(document.createElement('br'));
+}
+
+// ---------- comments ----------
+const spansOf = (id) => [...api.editor.querySelectorAll('span.cm')].filter((s) => s.dataset.cm === id);
+function startComment() {
+  api.restore();
+  const s = getSelection();
+  if (!s.rangeCount || s.isCollapsed || !api.inEditor(s.anchorNode)) { api.toast('Select the text you want to comment on.'); return; }
+  pending = s.getRangeAt(0).cloneRange();
+  editing = null;
+  api.showSide('review');
+  compose(clip(pending.toString(), 140), '', 'Add comment');
+}
+function compose(quote, text, label) {
+  api.$('#rv-compose').hidden = false;
+  api.$('#rv-quote').textContent = quote;
+  api.$('#rv-text').value = text;
+  api.$('#rv-save').textContent = label;
+  setTimeout(() => api.$('#rv-text').focus(), 0);
+}
+function closeCompose() { pending = null; editing = null; api.$('#rv-compose').hidden = true; }
+function saveComment() {
+  const text = api.$('#rv-text').value.trim();
+  if (!text) { api.$('#rv-text').focus(); return; }
+  if (editing) {
+    api.commit();
+    for (const s of spansOf(editing)) s.dataset.text = text;
+  } else {
+    if (!pending || !pending.startContainer.isConnected || !pending.endContainer.isConnected) { api.toast('That selection has changed. Select the text again.'); closeCompose(); return; }
+    api.commit();
+    const id = uid(), t = String(Date.now());
+    const made = pieces(pending).map((n) => {
+      const sp = document.createElement('span');
+      sp.className = 'cm';
+      Object.assign(sp.dataset, { cm: id, author: author(), time: t, text });
+      n.before(sp); sp.append(n);
+      return sp;
+    });
+    if (!made.length) { api.toast('There is no text in that selection to comment on.'); closeCompose(); return; }
+  }
+  closeCompose();
+  api.done();
+  render(true);
+}
+function commentAct(act, id) {
+  const spans = spansOf(id);
+  if (!spans.length) return;
+  if (act === 'edit') { editing = id; pending = null; compose(clip(spans.map((s) => s.textContent).join(''), 140), spans[0].dataset.text || '', 'Save comment'); return; }
+  if (act === 'go') { spans[0].scrollIntoView({ block: 'center', behavior: 'smooth' }); return; }
+  api.commit();
+  if (act === 'resolve') for (const s of spans) { if (s.dataset.resolved) delete s.dataset.resolved; else s.dataset.resolved = '1'; }
+  if (act === 'delete') spans.forEach(unwrap);
+  api.done();
+  render(true);
+}
+
+// ---------- track changes ----------
+const tracking = () => !!(api.doc && api.doc.track);
+function mark(tag) {
+  const el = document.createElement(tag);
+  el.className = 'tc';
+  el.dataset.author = author(); el.dataset.time = String(Date.now());
+  return el;
+}
+const ownIns = (n) => { const i = n.parentElement && n.parentElement.closest('ins.tc'); return i && i.dataset.author === author() ? i : null; };
+function mergeDels(root) {
+  for (const d of [...root.querySelectorAll('del.tc')]) {
+    const nx = d.nextSibling;
+    if (d.isConnected && nx && nx.nodeType === 1 && nx.matches('del.tc') && nx.dataset.author === d.dataset.author) { d.append(...nx.childNodes); nx.remove(); d.normalize(); }
+  }
+}
+// Marks the text in range as deleted. Returns { first, last } nodes for caret placement, or null if the range holds no text.
+function markDeleted(range) {
+  const ps = pieces(range);
+  if (!ps.length) return null;
+  let first = null, last = null;
+  for (const n of ps) {
+    const p = n.parentElement;
+    if (p.closest('del.tc')) { first = first || n; last = n; continue; }
+    const ins = ownIns(n);
+    if (ins) {
+      const anchor = document.createTextNode('');
+      n.replaceWith(anchor);
+      first = first || anchor; last = anchor;
+      continue;
+    }
+    const d = mark('del');
+    n.before(d); d.append(n);
+    first = first || d; last = d;
+  }
+  return { first, last };
+}
+function tidy(keep) {
+  const ed = api.editor;
+  for (const i of [...ed.querySelectorAll('ins.tc')]) if (!i.textContent && !i.querySelector('img,br') && !i.contains(keep)) i.remove();
+  mergeDels(ed);
+}
+function caretAt(node, before) {
+  const r = document.createRange();
+  let target = node;
+  while (target && !target.isConnected) target = null;
+  if (!target) return;
+  const d = target.nodeType === 1 ? target : target.parentElement && target.parentElement.closest('del.tc');
+  const ref = d && d.matches && d.matches('del.tc') ? d : target;
+  if (before) r.setStartBefore(ref); else r.setStartAfter(ref);
+  r.collapse(true);
+  const s = getSelection(); s.removeAllRanges(); s.addRange(r);
+}
+function insertTracked(text) {
+  const s = getSelection();
+  let r = s.getRangeAt(0);
+  if (!r.collapsed) {
+    const res = markDeleted(r);
+    if (res) caretAt(res.last, false); else r.deleteContents();
+    r = s.getRangeAt(0);
+  }
+  const at = r.startContainer.nodeType === 1 ? r.startContainer : r.startContainer.parentElement;
+  const del = at && at.closest('del.tc');
+  if (del) { r = document.createRange(); r.setStartAfter(del); r.collapse(true); }
+  const ins = mark('ins');
+  const tn = document.createTextNode(text);
+  ins.append(tn);
+  r.insertNode(ins);
+  const block = ins.parentElement;
+  if (block && block.lastChild && block.lastChild.nodeName === 'BR' && block.childNodes.length === 2 && block.firstChild === ins) block.lastChild.remove();
+  const c = document.createRange(); c.setStart(tn, tn.length); c.collapse(true);
+  s.removeAllRanges(); s.addRange(c);
+  tidy(ins);
+}
+function onBeforeInput(e) {
+  if (!tracking() || e.isComposing) return;
+  const t = e.inputType;
+  const s = getSelection();
+  if (!s.rangeCount || !api.inEditor(s.anchorNode)) return;
+  if (t === 'insertText') {
+    const r = s.getRangeAt(0);
+    if (e.data == null) return;
+    if (r.collapsed && r.startContainer.nodeType === 3 && ownIns(r.startContainer) && !r.startContainer.parentElement.closest('del.tc')) return; // typing extends our own insertion
+    e.preventDefault();
+    insertTracked(e.data);
+    api.changed();
+    return;
+  }
+  if (!t.startsWith('delete')) return;
+  let range = null;
+  if (!s.isCollapsed) range = s.getRangeAt(0).cloneRange();
+  else {
+    const tr = e.getTargetRanges ? e.getTargetRanges()[0] : null;
+    if (tr) { range = document.createRange(); try { range.setStart(tr.startContainer, tr.startOffset); range.setEnd(tr.endContainer, tr.endOffset); } catch { range = null; } }
+  }
+  if (!range || range.collapsed) return;
+  if (!textNodes(range).length) return;                // nothing but structure: let the browser join blocks
+  if (range.cloneContents().querySelector('img,table,hr,.shape,.chart,.toc,.page-break')) return;
+  e.preventDefault();
+  const back = /Backward|Cut|^deleteContent$/.test(t);
+  const blocks = api.selBlocks();
+  const res = markDeleted(range);
+  if (res) caretAt(back ? res.first : res.last, back);
+  tidy(null);
+  blocks.forEach(fixEmpty);
+  api.changed();
+}
+function pasteTracked(cd) {
+  if (!tracking()) return false;
+  const text = cd.getData('text/plain');
+  if (!text) return false;
+  const s = getSelection();
+  if (!s.rangeCount || !api.inEditor(s.anchorNode)) return false;
+  api.commit();
+  insertTracked(text.replace(/\r/g, ''));
+  api.done();
+  return true;
+}
+function resolveChange(el, accept) {
+  if (!el || !el.isConnected) return;
+  const keep = el.tagName === 'INS' ? accept : !accept;
+  const block = el.closest('p,h1,h2,h3,li,td,th,pre');
+  if (keep) unwrap(el); else { const p = el.parentNode; el.remove(); if (p) p.normalize(); }
+  fixEmpty(block);
+}
+function changeAct(act, el) {
+  if (act === 'go') { if (el.isConnected) el.scrollIntoView({ block: 'center', behavior: 'smooth' }); return; }
+  api.commit();
+  resolveChange(el, act === 'accept');
+  api.done();
+  render(true);
+}
+function allChanges(accept) {
+  const els = [...api.editor.querySelectorAll('ins.tc,del.tc')];
+  if (!els.length) { api.toast('There are no tracked changes.'); return; }
+  api.commit();
+  els.forEach((el) => resolveChange(el, accept));
+  api.done();
+  render(true);
+  api.toast(`${els.length} ${els.length === 1 ? 'change' : 'changes'} ${accept ? 'accepted' : 'rejected'}.`);
+}
+function setTrack(on) {
+  api.doc.track = on;
+  api.$$('[data-cmd="track"]').forEach((b) => { b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on)); });
+  const st = api.$('#st-track');
+  if (st) st.hidden = !on;
+}
+
+// ---------- review pane ----------
+function collect() {
+  const out = [], seen = new Set();
+  for (const el of api.editor.querySelectorAll('span.cm,ins.tc,del.tc')) {
+    if (el.matches('span.cm')) {
+      const id = el.dataset.cm;
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      out.push({ kind: 'cm', id, el, quote: spansOf(id).map((s) => s.textContent).join(''), text: el.dataset.text || '', author: el.dataset.author || '', time: el.dataset.time, resolved: !!el.dataset.resolved });
+    } else out.push({ kind: el.tagName === 'INS' ? 'ins' : 'del', el, quote: el.textContent, author: el.dataset.author || '', time: el.dataset.time });
+  }
+  return out;
+}
+function render(force) {
+  if (!paneOpen()) return;
+  const list = collect();
+  const s = JSON.stringify(list.map((i) => [i.kind, i.id, i.quote, i.text, i.author, i.time, i.resolved]));
+  if (!force && s === sig) return;
+  sig = s; items = list;
+  const { esc, ic } = api;
+  const changes = list.filter((i) => i.kind !== 'cm').length;
+  api.$('#rv-bulk').hidden = !changes;
+  api.$('#rv-empty').hidden = list.length > 0;
+  api.$('#rv-list').innerHTML = list.slice(0, 300).map((i, n) => {
+    const meta = `<span class="rv-who">${esc(i.author || 'Unknown')}</span><span class="rv-when">${esc(when(i.time))}</span>`;
+    if (i.kind === 'cm') {
+      return `<div class="issue rv-card${i.resolved ? ' resolved' : ''}" data-n="${n}"><div class="issue-top">${ic('comment')}${meta}</div>`
+        + `<p class="issue-ctx">“${esc(clip(i.quote))}”</p><p class="rv-body">${esc(i.text)}</p>`
+        + `<div class="issue-fix"><button class="link-btn" data-act="resolve">${i.resolved ? 'Reopen' : 'Resolve'}</button><button class="link-btn" data-act="edit">Edit</button><button class="link-btn" data-act="delete">Delete</button></div></div>`;
+    }
+    return `<div class="issue rv-card" data-n="${n}"><div class="issue-top">${ic('track')}${meta}</div>`
+      + `<p class="issue-ctx"><b>${i.kind === 'ins' ? 'Added' : 'Deleted'}</b> “${esc(clip(i.quote))}”</p>`
+      + `<div class="issue-fix"><button class="link-btn" data-act="accept">Accept</button><button class="link-btn" data-act="reject">Reject</button></div></div>`;
+  }).join('');
+}
+
+export function init(a) {
+  api = a;
+  const { $, editor } = api;
+  api.cmd('comment', startComment);
+  api.cmd('commentSave', saveComment);
+  api.cmd('commentCancel', closeCompose);
+  api.cmd('reviewPane', () => api.showSide(paneOpen() ? null : 'review'));
+  api.cmd('track', () => { setTrack(!api.doc.track); api.changed(true); api.toast(api.doc.track ? 'Track changes is on. Typing and deleting are now marked.' : 'Track changes is off.'); });
+  api.cmd('acceptAll', () => allChanges(true));
+  api.cmd('rejectAll', () => allChanges(false));
+
+  const name = $('#rv-author');
+  name.value = api.prefs.author || 'You';
+  name.addEventListener('change', () => { api.prefs.author = name.value.trim() || 'You'; name.value = api.prefs.author; api.savePrefs(); });
+  $('#rv-text').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); saveComment(); }
+    if (e.key === 'Escape') { e.preventDefault(); closeCompose(); }
+  });
+  $('#rv-list').addEventListener('click', (e) => {
+    const card = e.target.closest('.rv-card');
+    if (!card) return;
+    const it = items[Number(card.dataset.n)];
+    if (!it) return;
+    const btn = e.target.closest('[data-act]');
+    const act = btn ? btn.dataset.act : 'go';
+    if (it.kind === 'cm') commentAct(act, it.id); else changeAct(act, it.el);
+  });
+
+  editor.addEventListener('beforeinput', onBeforeInput);
+  api.on('paste', pasteTracked);
+  api.on('meta', () => render(false));
+  api.on('side', (which) => { if (which === 'review') render(true); else closeCompose(); });
+  api.on('load', () => { setTrack(!!api.doc.track); closeCompose(); sig = ''; render(true); });
+}
