@@ -153,6 +153,10 @@ function restoreSel(sel) {
   if (a && f) { try { getSelection().setBaseAndExtent(a[0], a[1], f[0], f[1]); } catch { /* selection could not be rebuilt */ } }
 }
 
+// Cells of a table row that hold plain text (cells with pictures or nested tables are left whole).
+const contentH = (cl) => { const r = document.createRange(); r.selectNodeContents(cl); return r.getBoundingClientRect().height; };
+const textCells = (tr) => [...tr.cells].filter((c) => c.textContent.trim().length && !c.querySelector('img,table'));
+
 // Column mode: slide everything from `range` onward (text and atomic inlines) by dx/dy. Nested wrappers add up, so a
 // paragraph can carry on through several columns. Only the visual position moves; line breaks are unchanged.
 function shiftAfter(el, range, dx, dy) {
@@ -378,6 +382,51 @@ export function layout() {
       SS = SS0 + dy; parted = true;
       return true;
     };
+    // A row taller than a column: cut every text cell at its own line boundaries and slide the pieces into the following columns.
+    const splitRowCols = (u) => {
+      const cells = textCells(u.el);
+      if (!cells.length) return false;
+      const hs = new Map(cells.map((cl) => [cl, contentH(cl)]));
+      const primary = cells.reduce((a, b) => (hs.get(b) > hs.get(a) ? b : a));
+      const st = new Map(cells.map((cl) => {
+        const lp = parseFloat(getComputedStyle(cl).lineHeight) / sc;
+        return [cl, { last: -1, dy: 0, top: u.t, lh: lp > 0 ? lp : (parseFloat(getComputedStyle(cl).fontSize) / sc) * 1.3 }];
+      }));
+      const bottom = () => kk * P + H - mb, top = () => kk * P + mt;
+      const py = (q) => (q.top - pr.top) / sc;
+      const c0 = c, kk0 = kk, SS0 = SS;
+      let did = 0, guard = 0;
+      own = null;
+      while (u.b + st.get(primary).dy + SS0 > bottom() + 0.5 && guard++ < 100) {
+        const lim = pr.top + (bottom() - SS0) * sc;
+        const found = [];
+        for (const cl of cells) {
+          const s = st.get(cl);
+          let cut = lineSplit(cl, lim, s.last);
+          if (!cut) continue;
+          const cellB = (cl.getBoundingClientRect().bottom - pr.top) / sc;
+          if (cellB - py(cut) < 1.5 * s.lh) { const c2 = lineSplit(cl, cut.top - 1, s.last); if (!c2) continue; cut = c2; }
+          if (py(cut) - s.top < 1.5 * s.lh) continue;   // would leave a lone line behind
+          found.push([cl, cut]);
+        }
+        if (!found.some(([cl]) => cl === primary)) break;
+        const cOld = c;
+        advance();
+        const dxInc = (c - cOld) * (colW + gapX);
+        for (const [cl, cut] of found) {
+          const s = st.get(cl), cutY = py(cut), dyInc = top() - SS0 - cutY;
+          shiftAfter(cl, cut.range, dxInc, dyInc);
+          s.dy += dyInc; s.last = cut.idx; s.top = top() - SS0;
+        }
+        did++;
+      }
+      if (!did) { c = c0; kk = kk0; return false; }
+      own = { x: c0 * (colW + gapX), ss: SS0 };
+      SS = SS0 + st.get(primary).dy; parted = true;
+      return true;
+    };
+    const tallRow = (u) => u.row && (u.b - u.t) > colH && textCells(u.el).length > 0;
+    const trySplitCols = (u) => (u.row ? splitRowCols(u) : splitCols(u));
     for (const u of us) {
       parted = false; own = null;
       if (u.brk) {
@@ -390,9 +439,9 @@ export function layout() {
       const top = () => kk * P + mt, bottom = () => kk * P + H - mb;
       if (first) { first = false; SS = 0; }
       else if (force || u.forced) { if (c !== 0 || (u.t + SS) > top() + 1) { c = cols - 1; advance(); } SS = top() - u.t; }
-      else if (u.b + SS > bottom() + 0.5 && !(u.split && splitCols(u))) { if (u.t + SS > top() + 1) { advance(); SS = top() - u.t; } }
+      else if (u.b + SS > bottom() + 0.5 && !((u.split || tallRow(u)) && trySplitCols(u))) { if (u.t + SS > top() + 1) { advance(); SS = top() - u.t; } }
       force = false;
-      if (!parted && u.split && u.b + SS > bottom() + 0.5) splitCols(u);
+      if (!parted && (u.split || tallRow(u)) && u.b + SS > bottom() + 0.5) trySplitCols(u);
       if (!parted && u.b - u.t > colH) { // taller than a column: it keeps its place and the next block starts on a fresh page
         kk = Math.max(kk, Math.floor((u.b + SS - 1) / P)); c = cols - 1;
       }
@@ -463,7 +512,7 @@ export function layout() {
     const splitRow = () => {
       const cells = cellsOf();
       if (!cells.length) return 0;
-      const hs = new Map(cells.map((c) => [c, c.getBoundingClientRect().height]));
+      const hs = new Map(cells.map((c) => [c, contentH(c)]));
       const primary = cells.reduce((a, b) => (hs.get(b) > hs.get(a) ? b : a));
       const lastOf = new Map();
       const px = (c) => (c.top - pr.top) / sc;
