@@ -112,14 +112,67 @@ const BLOCKY = 'p,ul,ol,li,table,div,figure,blockquote,pre,h1,h2,h3,h4,h5,h6';
 const splittable = (el) => SPLIT_TAGS.has(el.tagName) && !el.querySelector(BLOCKY) && el.textContent.trim().length > 40;
 const idx = (el) => Array.prototype.indexOf.call(el.parentNode.children, el) + 1;
 
-// Removes the in-text gaps that layout() inserted, so saved/undo/exported HTML never contains them.
+// Removes the in-text gaps and column-split wrappers that layout() inserted, so saved/undo/exported HTML never contains them.
 export function strip() {
   if (!api) return;
-  const gs = api.editor.querySelectorAll('.pg-gap');
-  if (!gs.length) return;
+  const ed = api.editor;
+  const gs = ed.querySelectorAll('.pg-gap'), pts = ed.querySelectorAll('.pg-part');
+  if (!gs.length && !pts.length) return;
+  const sel = pts.length ? saveSel() : null;
   const ps = new Set();
   gs.forEach((g) => { ps.add(g.parentNode); g.remove(); });
-  ps.forEach((q) => q.normalize());
+  pts.forEach((w) => { ps.add(w.parentNode); w.replaceWith(...w.childNodes); });
+  ps.forEach((q) => q.isConnected && q.normalize());
+  if (sel) restoreSel(sel);
+}
+
+// Wrapping text in spans moves its nodes, which would drop the caret; keep it by character offset instead.
+function saveSel() {
+  const s = getSelection();
+  if (!s.rangeCount || !api.editor.contains(s.anchorNode) || !api.editor.contains(s.focusNode)) return null;
+  const off = (node, o) => { const r = document.createRange(); r.setStart(api.editor, 0); r.setEnd(node, o); return r.toString().length; };
+  return [off(s.anchorNode, s.anchorOffset), off(s.focusNode, s.focusOffset)];
+}
+function restoreSel(sel) {
+  const find = (o) => {
+    const w = document.createTreeWalker(api.editor, NodeFilter.SHOW_TEXT);
+    let n, run = 0, lastN = null;
+    while ((n = w.nextNode())) {
+      if (o <= run + n.nodeValue.length) return [n, o - run];
+      run += n.nodeValue.length; lastN = n;
+    }
+    return lastN ? [lastN, lastN.nodeValue.length] : null;
+  };
+  const a = find(sel[0]), f = find(sel[1]);
+  if (a && f) { try { getSelection().setBaseAndExtent(a[0], a[1], f[0], f[1]); } catch { /* selection could not be rebuilt */ } }
+}
+
+// Column mode: slide everything from `range` onward (text and atomic inlines) by dx/dy. Nested wrappers add up, so a
+// paragraph can carry on through several columns. Only the visual position moves; line breaks are unchanged.
+function shiftAfter(el, range, dx, dy) {
+  let sn = range.startContainer;
+  if (sn.nodeType === 3 && range.startOffset > 0 && range.startOffset < sn.nodeValue.length) sn = sn.splitText(range.startOffset);
+  else if (sn.nodeType === 3 && range.startOffset >= sn.nodeValue.length) sn = null;
+  else if (sn.nodeType === 1) sn = sn.childNodes[range.startOffset] || null;
+  const leaves = [];
+  const w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT, {
+    acceptNode: (n) => {
+      if (n.nodeType === 3) return (n.nodeValue.length && !n.parentElement.closest('[contenteditable="false"]')) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+      if (n.tagName === 'IMG' || n.tagName === 'BR' || n.getAttribute('contenteditable') === 'false') return NodeFilter.FILTER_ACCEPT;
+      return NodeFilter.FILTER_SKIP;
+    },
+  });
+  let n, on = false;
+  while ((n = w.nextNode())) {
+    if (!on) { if (n === sn || (sn && sn.contains && sn.contains(n)) || (sn && (sn.compareDocumentPosition(n) & Node.DOCUMENT_POSITION_FOLLOWING))) on = true; else continue; }
+    leaves.push(n);
+  }
+  for (const l of leaves) {
+    const sp = document.createElement('span');
+    sp.className = 'pg-part';
+    sp.style.cssText = `position:relative;left:${dx.toFixed(2)}px;top:${dy.toFixed(2)}px`;
+    l.parentNode.insertBefore(sp, l); sp.append(l);
+  }
 }
 
 function units(ed) {
@@ -235,14 +288,42 @@ export function layout() {
   }
   if (cols > 1) {
     const colH = H - mt - mb;
+    const sel0 = saveSel();
     let c = 0, kk = 0, SS = 0, pend2 = null, css2 = '', first = true;
     secs = [];
     const advance = () => {
       c++;
       if (c >= cols) { c = 0; kk++; if (pend2) { secs.push({ ...pend2, page: kk }); pend2 = null; } }
     };
-    let force = false;
+    let force = false, parted = false, own = null;
+    // Let a paragraph run on into the next column(s): cut it at line boundaries and slide each following part up there.
+    const splitCols = (u) => {
+      const lhPx = parseFloat(getComputedStyle(u.el).lineHeight) / sc;
+      const lh = (lhPx > 0 ? lhPx : (parseFloat(getComputedStyle(u.el).fontSize) / sc) * 1.3);
+      const bottom = () => kk * P + H - mb, top = () => kk * P + mt;
+      let dy = 0, last = -1, pieceTop = u.t, did = 0, c0 = c, kk0 = kk, SS0 = SS;
+      own = null;
+      while (u.b + dy + SS0 > bottom() + 0.5) {
+        const lim = pr.top + (bottom() - SS0) * sc;
+        let cut = lineSplit(u.el, lim, last);
+        if (!cut) break;
+        const py = (q) => (q.top - pr.top) / sc;
+        if ((u.b + dy - py(cut)) < 1.5 * lh) { const c2 = lineSplit(u.el, cut.top - 1, last); if (!c2) break; cut = c2; }
+        const cutY = py(cut);
+        if (cutY - pieceTop < 1.5 * lh) break;       // would leave a lone line behind
+        const cOld = c;
+        advance();
+        const dyInc = top() - SS0 - cutY, dxInc = (c - cOld) * (colW + gapX);
+        shiftAfter(u.el, cut.range, dxInc, dyInc);
+        dy += dyInc; did++; last = cut.idx; pieceTop = top() - SS0;
+      }
+      if (!did) { c = c0; kk = kk0; return false; }
+      own = { x: c0 * (colW + gapX), ss: SS0 };
+      SS = SS0 + dy; parted = true;
+      return true;
+    };
     for (const u of us) {
+      parted = false; own = null;
       if (u.brk) {
         if (u.el.classList.contains('sect-break')) pend2 = parseSect(u.el);
         force = true;
@@ -253,18 +334,20 @@ export function layout() {
       const top = () => kk * P + mt, bottom = () => kk * P + H - mb;
       if (first) { first = false; SS = 0; }
       else if (force || u.forced) { if (c !== 0 || (u.t + SS) > top() + 1) { c = cols - 1; advance(); } SS = top() - u.t; }
-      else if (u.b + SS > bottom() + 0.5 && u.t + SS > top() + 1) { advance(); SS = top() - u.t; }
+      else if (u.b + SS > bottom() + 0.5 && !(u.split && splitCols(u))) { if (u.t + SS > top() + 1) { advance(); SS = top() - u.t; } }
       force = false;
-      if (u.b - u.t > colH) { // taller than a column: it keeps its place and the next block starts on a fresh page
+      if (!parted && u.split && u.b + SS > bottom() + 0.5) splitCols(u);
+      if (!parted && u.b - u.t > colH) { // taller than a column: it keeps its place and the next block starts on a fresh page
         kk = Math.max(kk, Math.floor((u.b + SS - 1) / P)); c = cols - 1;
       }
-      const x = c * (colW + gapX);
-      if (x || SS) css2 += `${u.sel}{position:relative;left:${x.toFixed(2)}px;top:${SS.toFixed(2)}px}`;
+      const x = own ? own.x : c * (colW + gapX), ss = own ? own.ss : SS;
+      if (x || ss) css2 += `${u.sel}{position:relative;left:${x.toFixed(2)}px;top:${ss.toFixed(2)}px}`;
     }
     n = kk + 1;
     const total = n * H + (n - 1) * GAP;
     rules.textContent += css2 + `#editor{height:${total - mt - mb}px !important;min-height:0 !important}`;
     page.style.height = total + 'px';
+    if (sel0 && api.editor.querySelector('.pg-part')) restoreSel(sel0);
     drawSheets(n, false);
     drawHf(d, false);
     return;
