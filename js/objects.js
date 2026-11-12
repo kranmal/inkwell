@@ -60,7 +60,9 @@ function insertTextbox() {
 }
 
 // ---------- charts ----------
-const PALETTE = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#6250d6', '#e34948'];
+export const TYPES = ['column', 'stacked', 'bar', 'line', 'area', 'pie', 'donut'];
+export const MAX_SERIES = 12;
+export const PALETTE = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#6250d6', '#e34948', '#17a2b8', '#8a5a2b', '#7a8b99', '#c2185b'];
 const OTHER = '#9a9a9a', INK = '#1f1f1f', INK2 = '#5f5f5f', GRID = '#e6e6e6', AXIS = '#bdbdbd';
 const W = 640, H = 360, FONT = 'system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif';
 const DEMO = 'Quarter, 2025, 2026\nQ1, 120, 150\nQ2, 135, 162\nQ3, 128, 171\nQ4, 149, 190';
@@ -79,8 +81,8 @@ export function parseData(text) {
   const cols = Math.max(0, ...rows.map((r) => r.length)) - 1;
   if (!rows.length || cols < 1) return null;
   const series = [];
-  for (let c = 1; c <= Math.min(cols, 8); c++) series.push({ name: (head && head[c]) || `Series ${c}`, values: rows.map((r) => num(r[c]) ?? 0) });
-  return { labels: rows.map((r) => r[0] || ''), series, dropped: Math.max(0, cols - 8) };
+  for (let c = 1; c <= Math.min(cols, MAX_SERIES); c++) series.push({ name: (head && head[c]) || `Series ${c}`, values: rows.map((r) => num(r[c]) ?? 0) });
+  return { labels: rows.map((r) => r[0] || ''), series, dropped: Math.max(0, cols - MAX_SERIES) };
 }
 export function toCsv(cfg) {
   const head = ['', ...cfg.series.map((s) => s.name)].join(', ').replace(/^, /, 'Label, ');
@@ -116,15 +118,15 @@ function legend(names, colors, y) {
 }
 
 export function renderChart(cfg) {
-  const type = ['column', 'bar', 'line', 'pie'].includes(cfg.type) ? cfg.type : 'column';
-  const labels = cfg.labels || [], series = (cfg.series || []).slice(0, 8);
+  const type = TYPES.includes(cfg.type) ? cfg.type : 'column';
+  const labels = cfg.labels || [], series = (cfg.series || []).slice(0, MAX_SERIES);
   const title = (cfg.title || '').trim();
   let body = '';
   let top = 20;
   if (title) { body += `<text x="24" y="32" font-size="16" font-weight="600" fill="${INK}">${x(cut(title, 70))}</text>`; top = 48; }
   const desc = `${title || 'Chart'}: ${type} chart of ${series.map((s) => s.name).join(', ')} by ${labels.length} categories`;
 
-  if (type === 'pie') {
+  if (type === 'pie' || type === 'donut') {
     const vals = (series[0] ? series[0].values : []).map((v) => Math.max(0, v));
     let parts = labels.map((l, i) => ({ l, v: vals[i] || 0 })).filter((p) => p.v > 0);
     if (parts.length > 8) { const rest = parts.slice(7); parts = [...parts.slice(0, 7), { l: 'Other', v: rest.reduce((a, p) => a + p.v, 0), other: true }]; }
@@ -142,11 +144,14 @@ export function renderChart(cfg) {
       body += `<rect x="372" y="${f1(ly - 9)}" width="10" height="10" rx="2" fill="${col}"/><text x="388" y="${f1(ly)}" font-size="12" fill="${INK}">${x(cut(p.l, 22))}</text><text x="${W - 24}" y="${f1(ly)}" font-size="12" fill="${INK2}" text-anchor="end">${full.format(p.v)} · ${f1((p.v / total) * 100)}%</text>`;
       a0 = a1;
     });
+    if (type === 'donut' && parts.length) body += `<circle cx="${cx}" cy="${f1(cy)}" r="${f1(R * 0.55)}" fill="#fff"/>`;
     if (!parts.length) body += `<text x="${W / 2}" y="${H / 2}" font-size="13" fill="${INK2}" text-anchor="middle">No positive values to show</text>`;
   } else {
     if (series.length > 1) { body += legend(series.map((s) => s.name), PALETTE, top + 8); top += 26; }
     const all = series.flatMap((s) => s.values);
-    const sc = scale(Math.min(0, ...all), Math.max(0, ...all));
+    const stackTot = (i) => series.reduce((a, s) => a + Math.max(0, s.values[i] || 0), 0);
+    const hiV = type === 'stacked' ? Math.max(0, ...labels.map((_, i) => stackTot(i))) : Math.max(0, ...all);
+    const sc = scale(Math.min(0, ...all), hiV);
     const n = Math.max(1, labels.length), m = series.length || 1;
     if (type === 'bar') {
       const longest = Math.max(0, ...labels.map((l) => Math.min(l.length, 18)));
@@ -170,7 +175,14 @@ export function renderChart(cfg) {
       const every = Math.ceil(n / Math.max(1, Math.floor((R - L) / 64)));
       const maxCh = Math.max(3, Math.floor((band * every) / 6.4));
       labels.forEach((l, i) => { if (i % every === 0) body += `<text x="${f1(L + band * i + band / 2)}" y="${B + 18}" font-size="11" fill="${INK2}" text-anchor="middle">${x(cut(l, maxCh))}</text>`; });
-      if (type === 'column') {
+      if (type === 'stacked') {
+        const pad = Math.min(14, band * 0.18), bw = Math.max(2, band - pad * 2);
+        labels.forEach((l, i) => { let acc = 0; series.forEach((s, j) => {
+          const v = Math.max(0, s.values[i] || 0);
+          if (v) { const y0 = Y(acc), y1 = Y(acc + v); body += `<rect x="${f1(L + band * i + pad)}" y="${f1(y1)}" width="${f1(bw)}" height="${f1(Math.max(0.5, y0 - y1 - 1))}" fill="${PALETTE[j]}"><title>${x(l)} · ${x(s.name)}: ${full.format(v)}</title></rect>`; }
+          acc += v;
+        }); });
+      } else if (type === 'column') {
         const pad = Math.min(14, band * 0.18), bw = Math.max(2, (band - pad * 2 - (m - 1) * 2) / m);
         labels.forEach((l, i) => series.forEach((s, j) => {
           const v = s.values[i] || 0;
@@ -179,6 +191,7 @@ export function renderChart(cfg) {
       } else {
         series.forEach((s, j) => {
           const pts = labels.map((l, i) => [L + band * i + band / 2, Y(s.values[i] || 0)]);
+          if (type === 'area') body += `<path d="M${f1(pts[0][0])},${f1(Y(0))}L${pts.map((p) => `${f1(p[0])},${f1(p[1])}`).join('L')}L${f1(pts[pts.length - 1][0])},${f1(Y(0))}Z" fill="${PALETTE[j]}" fill-opacity="0.3"/>`;
           body += `<path d="M${pts.map((p) => `${f1(p[0])},${f1(p[1])}`).join('L')}" fill="none" stroke="${PALETTE[j]}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
           if (n <= 24) pts.forEach((p, i) => { body += `<circle cx="${f1(p[0])}" cy="${f1(p[1])}" r="4" fill="${PALETTE[j]}" stroke="#fff" stroke-width="2"><title>${x(labels[i])} · ${x(s.name)}: ${full.format(s.values[i] || 0)}</title></circle>`; });
         });
@@ -188,7 +201,7 @@ export function renderChart(cfg) {
   }
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="${x(desc)}" font-family="${FONT}">${body}</svg>`;
 }
-function readCfg(fig) { try { const c = JSON.parse(fig.dataset.chart || ''); return c && Array.isArray(c.series) ? c : null; } catch { return null; } }
+export function readCfg(fig) { try { const c = JSON.parse(fig.dataset.chart || ''); return c && Array.isArray(c.series) ? c : null; } catch { return null; } }
 function draw(fig) {
   const cfg = readCfg(fig);
   fig.innerHTML = cfg ? renderChart(cfg) : '';
@@ -212,7 +225,7 @@ function applyChart() {
   const data = parseData(api.$('#ch-data').value);
   if (!data) { api.toast('The chart needs a label column and at least one column of numbers.'); return; }
   const cfg = { type: api.$('#ch-type').value, title: api.$('#ch-title').value.trim(), labels: data.labels, series: data.series };
-  if (data.dropped) api.toast('Charts show up to 8 series. The extra columns were left out.');
+  if (data.dropped) api.toast('Charts show up to 12 series. The extra columns were left out.');
   if (chartTarget && chartTarget.isConnected) {
     api.commit();
     chartTarget.dataset.chart = JSON.stringify(cfg);
