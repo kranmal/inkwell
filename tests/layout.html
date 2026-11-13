@@ -654,6 +654,24 @@ const tests = [
     if (!/old/.test(text('del.tc')) || !/Removed paragraph entirely/.test(text('del.tc'))) f.push('deletions came back as ' + text('del.tc'));
     if (!/new/.test(text('ins.tc')) || !/Brand new paragraph/.test(text('ins.tc'))) f.push('insertions came back as ' + text('ins.tc'));
     if (box.querySelector('ins.tc')?.dataset.author !== 'Compare') f.push('author lost');
+    const fc = box.querySelector('span.fc');
+    if (!fc) f.push('the formatting change did not come back');
+    else {
+      if (fc.dataset.author !== 'Compare' || !/Bold/.test(fc.dataset.label)) f.push('formatting change details lost: ' + fc.outerHTML);
+      if (fc.dataset.was !== 'me') f.push('the old look should be plain text, got ' + fc.dataset.was);
+      if (!fc.dataset.lift) f.push('the mark must lift out of the bold it sits in, so rejecting restores the old look');
+      await load(box.innerHTML);
+      D.querySelector('[data-cmd="rejectAll"]').click();
+      await sleep(250);
+      if (/<(strong|b)>\s*me/.test(ed.innerHTML) || !/Format me please/.test(ed.textContent)) f.push('rejecting did not give back the plain words: ' + ed.innerHTML.slice(0, 300));
+    }
+    // and a change that removes bold comes back with the bold as its old look
+    const x2 = await exportDocx(Object.assign(document.createElement('div'), { innerHTML: '<p>Is <span class="fc" data-author="Sam" data-time="1" data-label="Bold" data-was="&lt;b&gt;this&lt;/b&gt;">this</span> bold?</p>' }), { title: 't', page: { w: 210, h: 297, m: { t: 25, r: 25, b: 25, l: 25 } } });
+    const r2 = await prepare(JSZip, await x2.arrayBuffer());
+    const b2 = document.createElement('div');
+    b2.innerHTML = r2.finish((await mammoth.convertToHtml({ arrayBuffer: r2.buffer })).value);
+    const fc2 = b2.querySelector('span.fc');
+    if (!fc2 || fc2.dataset.author !== 'Sam' || fc2.dataset.was !== '<strong>this</strong>') f.push('removed bold came back as ' + (fc2 ? fc2.outerHTML : 'nothing'));
     return { fail: f, info: count(/<w:ins /g) + ' ins, ' + count(/<w:del /g) + ' del' };
   } },
   { name: 'PDF export has one page per layout page, real text, links and bookmarks', async run() {
