@@ -60,7 +60,7 @@ function insertTextbox() {
 }
 
 // ---------- charts ----------
-export const TYPES = ['column', 'stacked', 'bar', 'line', 'area', 'pie', 'donut'];
+export const TYPES = ['column', 'stacked', 'bar', 'line', 'area', 'combo', 'scatter', 'radar', 'pie', 'donut'];
 export const MAX_SERIES = 12;
 export const PALETTE = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#6250d6', '#e34948', '#17a2b8', '#8a5a2b', '#7a8b99', '#c2185b'];
 const OTHER = '#9a9a9a', INK = '#1f1f1f', INK2 = '#5f5f5f', GRID = '#e6e6e6', AXIS = '#bdbdbd';
@@ -153,7 +153,33 @@ export function renderChart(cfg) {
     const hiV = type === 'stacked' ? Math.max(0, ...labels.map((_, i) => stackTot(i))) : Math.max(0, ...all);
     const sc = scale(Math.min(0, ...all), hiV);
     const n = Math.max(1, labels.length), m = series.length || 1;
-    if (type === 'bar') {
+    if (type === 'scatter') {
+      const xs = labels.map((l, i) => { const v = Number(String(l).replace(/[,\s%£$€]/g, '')); return String(l).trim() !== '' && isFinite(v) ? v : i + 1; });
+      const sx = scale(Math.min(...xs, Infinity) === Infinity ? 0 : Math.min(...xs), Math.max(...xs, -Infinity) === -Infinity ? 1 : Math.max(...xs));
+      const L = 56, R = W - 24, T = top + 8, B = H - 40;
+      const Y = (v) => B - ((v - sc.lo) / (sc.hi - sc.lo)) * (B - T), X = (v) => L + ((v - sx.lo) / (sx.hi - sx.lo)) * (R - L);
+      for (const t of sc.ticks) body += `<line x1="${L}" x2="${R}" y1="${f1(Y(t))}" y2="${f1(Y(t))}" stroke="${GRID}"/><text x="${L - 8}" y="${f1(Y(t) + 4)}" font-size="11" fill="${INK2}" text-anchor="end">${short.format(t)}</text>`;
+      for (const t of sx.ticks) body += `<line x1="${f1(X(t))}" x2="${f1(X(t))}" y1="${T}" y2="${B}" stroke="${GRID}"/><text x="${f1(X(t))}" y="${B + 18}" font-size="11" fill="${INK2}" text-anchor="middle">${short.format(t)}</text>`;
+      series.forEach((s, j) => xs.forEach((xv, i) => { body += `<circle cx="${f1(X(xv))}" cy="${f1(Y(s.values[i] || 0))}" r="5" fill="${PALETTE[j]}" fill-opacity="0.85" stroke="#fff" stroke-width="1.5"><title>${x(s.name)}: (${full.format(xv)}, ${full.format(s.values[i] || 0)})</title></circle>`; }));
+      body += `<line x1="${L}" x2="${R}" y1="${B}" y2="${B}" stroke="${AXIS}"/><line x1="${L}" x2="${L}" y1="${T}" y2="${B}" stroke="${AXIS}"/>`;
+    } else if (type === 'radar') {
+      const rs = scale(0, Math.max(0, ...all)), cx = W / 2, cy = (top + H - 8) / 2 + 4, R0 = Math.min((H - top - 52) / 2, 140), k = Math.max(3, n);
+      const ang = (i) => -Math.PI / 2 + (i / k) * Math.PI * 2, P = (i, r) => `${f1(cx + r * Math.cos(ang(i)))},${f1(cy + r * Math.sin(ang(i)))}`;
+      const rad = (v) => ((v - rs.lo) / (rs.hi - rs.lo)) * R0;
+      for (const t of rs.ticks) {
+        if (t <= rs.lo) continue;
+        body += `<path d="M${Array.from({ length: k }, (_, i) => P(i, rad(t))).join('L')}Z" fill="none" stroke="${GRID}"/><text x="${f1(cx + 4)}" y="${f1(cy - rad(t) + 11)}" font-size="10" fill="${INK2}">${short.format(t)}</text>`;
+      }
+      labels.forEach((l, i) => {
+        const a = ang(i), tx = cx + (R0 + 14) * Math.cos(a), ty = cy + (R0 + 14) * Math.sin(a) + 4, an = Math.cos(a) > 0.3 ? 'start' : Math.cos(a) < -0.3 ? 'end' : 'middle';
+        body += `<line x1="${f1(cx)}" y1="${f1(cy)}" x2="${f1(cx + R0 * Math.cos(a))}" y2="${f1(cy + R0 * Math.sin(a))}" stroke="${GRID}"/><text x="${f1(tx)}" y="${f1(ty)}" font-size="11" fill="${INK2}" text-anchor="${an}">${x(cut(l, 14))}</text>`;
+      });
+      series.forEach((s, j) => {
+        const pts = labels.map((_, i) => P(i, Math.max(0, rad(s.values[i] || 0))));
+        body += `<path d="M${pts.join('L')}Z" fill="${PALETTE[j]}" fill-opacity="0.15" stroke="${PALETTE[j]}" stroke-width="2" stroke-linejoin="round"/>`;
+        labels.forEach((l, i) => { const [px, py] = pts[i].split(','); body += `<circle cx="${px}" cy="${py}" r="3.5" fill="${PALETTE[j]}" stroke="#fff" stroke-width="1.5"><title>${x(l)} · ${x(s.name)}: ${full.format(s.values[i] || 0)}</title></circle>`; });
+      });
+    } else if (type === 'bar') {
       const longest = Math.max(0, ...labels.map((l) => Math.min(l.length, 18)));
       const L = 28 + longest * 6.2, R = W - 28, T = top + 6, B = H - 34;
       const X = (v) => L + ((v - sc.lo) / (sc.hi - sc.lo)) * (R - L);
@@ -182,12 +208,18 @@ export function renderChart(cfg) {
           if (v) { const y0 = Y(acc), y1 = Y(acc + v); body += `<rect x="${f1(L + band * i + pad)}" y="${f1(y1)}" width="${f1(bw)}" height="${f1(Math.max(0.5, y0 - y1 - 1))}" fill="${PALETTE[j]}"><title>${x(l)} · ${x(s.name)}: ${full.format(v)}</title></rect>`; }
           acc += v;
         }); });
-      } else if (type === 'column') {
-        const pad = Math.min(14, band * 0.18), bw = Math.max(2, (band - pad * 2 - (m - 1) * 2) / m);
-        labels.forEach((l, i) => series.forEach((s, j) => {
+      } else if (type === 'column' || type === 'combo') {
+        const mm = type === 'combo' ? 1 : m, pad = Math.min(14, band * 0.18), bw = Math.max(2, (band - pad * 2 - (mm - 1) * 2) / mm);
+        labels.forEach((l, i) => series.slice(0, mm).forEach((s, j) => {
           const v = s.values[i] || 0;
           if (v) body += `<path d="${vbar(L + band * i + pad + j * (bw + 2), Y(0), Y(v), bw)}" fill="${PALETTE[j]}"><title>${x(l)} · ${x(s.name)}: ${full.format(v)}</title></path>`;
         }));
+        if (type === 'combo') series.forEach((s, j) => {
+          if (j === 0) return;
+          const pts = labels.map((l, i) => [L + band * i + band / 2, Y(s.values[i] || 0)]);
+          body += `<path d="M${pts.map((p) => `${f1(p[0])},${f1(p[1])}`).join('L')}" fill="none" stroke="${PALETTE[j]}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+          if (n <= 24) pts.forEach((p, i) => { body += `<circle cx="${f1(p[0])}" cy="${f1(p[1])}" r="4" fill="${PALETTE[j]}" stroke="#fff" stroke-width="2"><title>${x(labels[i])} · ${x(s.name)}: ${full.format(s.values[i] || 0)}</title></circle>`; });
+        });
       } else {
         series.forEach((s, j) => {
           const pts = labels.map((l, i) => [L + band * i + band / 2, Y(s.values[i] || 0)]);
