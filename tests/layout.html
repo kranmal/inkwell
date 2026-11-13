@@ -541,6 +541,37 @@ const tests = [
     D.querySelector('[data-cmd="reviewPane"]').click();
     return { fail: f, info: `${n} changes, wraps both ways` };
   } },
+  { name: 'Compare marks edited, added and removed footnotes and comments', async run() {
+    const { diffHtml } = await import('../js/compare.js?t=' + Date.now());
+    const fn = (id, n) => `<sup class="fn-ref" data-fn="${id}" contenteditable="false">${n}</sup>`;
+    const cm = (id, text, q) => `<span class="cm" data-cm="${id}" data-author="Sam" data-time="1" data-text="${text}">${q}</span>`;
+    const oldH = `<p>First paragraph has a note${fn('a', 1)} in it.</p><p>Second paragraph has another${fn('b', 2)} one.</p><p>Third paragraph is ${cm('c1', 'Check this', 'commented words')} here.</p><p>Fourth paragraph is ${cm('c2', 'Remove me', 'doomed words')} here.</p><ol class="footnotes"><li data-fn="a">The original source was the 1999 report.</li><li data-fn="b">A second note that will be deleted.</li></ol>`;
+    const newH = `<p>First paragraph has a note${fn('a', 1)} in it.</p><p>Second paragraph has another one.</p><p>Third paragraph is ${cm('c1', 'Check this twice', 'commented words')} here${fn('n', 2)}.</p><p>Fourth paragraph is doomed words here.</p><p>Fifth ${cm('c3', 'New remark', 'fresh words')} paragraph.</p><ol class="footnotes"><li data-fn="a">The original source was the 2004 report.</li><li data-fn="n">A brand new note.</li></ol>`;
+    const r = diffHtml(oldH, newH), f = [];
+    await load(r.html);
+    const q = (sel) => [...ed.querySelectorAll(sel)];
+    const note = (id) => ed.querySelector(`ol.footnotes li[data-fn="${id}"]`);
+    if (!note('a') || !note('a').querySelector('del.tc') || !note('a').querySelector('ins.tc')) f.push('the edited note text was not marked');
+    if (note('a') && !/1999/.test(note('a').querySelector('del.tc')?.textContent || '')) f.push('old note wording not shown as deleted');
+    const nn = note('n');
+    if (!nn || !nn.querySelector('ins.tc')) f.push('the added note was not marked as inserted');
+    if (!q('ins.tc').some((x) => x.querySelector('sup.fn-ref[data-fn="n"]'))) f.push('the reference to the added note was not marked as inserted');
+    if (!q('del.tc').some((x) => x.querySelector('sup.fn-ref'))) f.push('the reference to the removed note was not shown as deleted');
+    if (!q('ol.footnotes li del.tc').some((x) => /deleted/.test(x.textContent))) f.push('the removed note is missing from the list');
+    const c1 = ed.querySelector('span.cm[data-cm="c1"]');
+    if (!c1 || !/was “Check this”/.test(c1.dataset.text)) f.push('the changed comment does not carry the old text: ' + (c1 && c1.dataset.text));
+    const gone = q('span.cm').find((x) => /Deleted comment by Sam: Remove me/.test(x.dataset.text));
+    if (!gone || gone.textContent !== 'doomed words') f.push('the removed comment did not come back on its words');
+    if (!ed.querySelector('span.cm[data-cm="c3"]')) f.push('the added comment was lost');
+    if (r.stats.unmarked) f.push(r.stats.unmarked + ' changes unmarked');
+    // rejecting every change must give back the old notes
+    D.querySelector('[data-cmd="rejectAll"]').click();
+    await sleep(250);
+    const left = [...ed.querySelectorAll('ol.footnotes li')].map((li) => li.textContent.trim());
+    if (left.length !== 2) f.push('after rejecting there are ' + left.length + ' notes, expected 2: ' + JSON.stringify(left));
+    else if (!/1999/.test(left[0]) || !/deleted/.test(left[1])) f.push('rejected notes read ' + JSON.stringify(left));
+    return { fail: f, info: JSON.stringify(r.stats) };
+  } },
   { name: 'PDF export has one page per layout page, real text, links and bookmarks', async run() {
     await load(`<h1>Heading one</h1><p>Visit <a href="https://example.com/x">our site</a> and <b>read</b> this.</p><p>${lorem(1200)}</p><h2>Second</h2><p>${lorem(300)}</p>`, 1);
     const pdf = await W.eval(`import('${new URL('../js/pdf.js', location.href).href}')`), pages = (await W.eval(`import('${new URL('../js/pages.js', location.href).href}')`)).count();
