@@ -245,6 +245,26 @@ const tests = [
     if (again.changes) f.push('identical document with pictures reported changes');
     return { fail: f, info: JSON.stringify(r.stats) };
   } },
+  { name: 'Compare keeps inline formatting and marks text edits beside objects', async run() {
+    const { diffHtml } = await import('../js/compare.js?t=' + Date.now());
+    const old = '<p>The <b>quick brown</b> fox jumps over the <a href="https://x.test">lazy dog</a> today.</p><p>Energy is <span class="eq">E=mc2</span> and more text here<sup class="fn-ref">1</sup> ends.</p>';
+    const cur = '<p>The <b>quick red</b> fox jumps over the <a href="https://x.test">lazy dog</a> now.</p><p>Energy is <span class="eq">E=mc2</span> and extra text here<sup class="fn-ref">1</sup> ends.</p>';
+    const r = diffHtml(old, cur), f = [];
+    const box = document.createElement('div'); box.innerHTML = r.html;
+    const ps = box.querySelectorAll('p');
+    if (!ps[0].querySelector('b') || !ps[0].querySelector('a[href]')) f.push('bold or link lost: ' + ps[0].innerHTML);
+    if (!/brown/.test([...ps[0].querySelectorAll('del.tc')].map((e) => e.textContent).join()) || !/red/.test([...ps[0].querySelectorAll('ins.tc')].map((e) => e.textContent).join())) f.push('word change not marked: ' + ps[0].innerHTML);
+    if (!ps[1].querySelector('.eq') || !ps[1].querySelector('.fn-ref')) f.push('objects lost: ' + ps[1].innerHTML);
+    if (!/extra/.test([...ps[1].querySelectorAll('ins.tc')].map((e) => e.textContent).join())) f.push('edit beside objects not marked: ' + ps[1].innerHTML);
+    if (r.stats.unmarked || r.stats.edited !== 2) f.push('stats ' + JSON.stringify(r.stats));
+    const rej = box.cloneNode(true); rej.querySelectorAll('ins.tc').forEach((e) => e.remove());
+    rej.querySelectorAll('del.tc').forEach((e) => e.replaceWith(...e.childNodes));
+    const norm = (t) => t.replace(/\s+/g, ' ').trim();
+    const want = document.createElement('div'); want.innerHTML = old;
+    if (norm(rej.textContent) !== norm(want.textContent)) f.push('rejecting all gives: ' + norm(rej.textContent));
+    if (diffHtml(cur, cur).changes) f.push('identical document reported changes');
+    return { fail: f, info: JSON.stringify(r.stats) };
+  } },
   { name: 'PDF export has one page per layout page, real text, links and bookmarks', async run() {
     await load(`<h1>Heading one</h1><p>Visit <a href="https://example.com/x">our site</a> and <b>read</b> this.</p><p>${lorem(1200)}</p><h2>Second</h2><p>${lorem(300)}</p>`, 1);
     const pdf = await W.eval(`import('${new URL('../js/pdf.js', location.href).href}')`), pages = (await W.eval(`import('${new URL('../js/pages.js', location.href).href}')`)).count();

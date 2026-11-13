@@ -11,7 +11,6 @@ const MAX_CELLS = 20e6;
 const AUTHOR = 'Compare';
 
 const norm = (t) => t.replace(/\s+/g, ' ').trim();
-const esc = (t) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 function parse(html) {
   const d = document.createElement('div');
@@ -104,23 +103,65 @@ function mark(tag, time) {
   return el;
 }
 
-// Word-level markup of one edited paragraph.
-function wordDiff(oldText, newText, time) {
-  const a = oldText.split(/(\s+)/).filter(Boolean), b = newText.split(/(\s+)/).filter(Boolean);
-  const pairs = align(a.length, b.length, (i, j) => (a[i] === b[j] ? 1 : 0)) || [];
-  const out = [];
-  const run = (tag, toks) => {
-    if (!toks.length) return;
-    const el = mark(tag, time); el.textContent = toks.join('');
-    out.push(el.outerHTML);
+// Text of an element without its objects (footnote marks, equations, field results and so on).
+const plain = (el) => {
+  const out = [], walk = (n) => {
+    for (const c of n.childNodes) {
+      if (c.nodeType === 3) out.push(c.textContent);
+      else if (c.nodeType === 1 && !c.matches(OBJ)) walk(c);
+    }
   };
+  walk(el);
+  return out.join('');
+};
+
+// Word-level markup of one edited paragraph, done in place so its bold, italic, links and objects are kept.
+// New words are wrapped as insertions where they sit; removed words appear as deletions in their place.
+// Returns how many marks were made.
+function markText(el, oldText, time) {
+  const toks = [];                                   // words of the new paragraph, with where they are
+  const walk = (n) => {
+    for (const c of [...n.childNodes]) {
+      if (c.nodeType === 3) { for (const m of c.textContent.matchAll(/\S+/g)) toks.push({ node: c, s: m.index, e: m.index + m[0].length, w: m[0] }); } else if (c.nodeType === 1 && !c.matches(OBJ)) walk(c);
+    }
+  };
+  walk(el);
+  const old = oldText.split(' ').filter(Boolean);
+  const pairs = align(old.length, toks.length, (i, j) => (old[i] === toks[j].w ? 1 : 0)) || [];
+  const ev = [];                                     // { node, s, e, del }: wrap [s,e) as inserted, put `del` before it
   let i = 0, j = 0;
-  for (const [pi, pj] of [...pairs, [a.length, b.length]]) {
-    run('del', a.slice(i, pi)); run('ins', b.slice(j, pj));
-    if (pi < a.length) out.push(esc(a[pi]));
+  for (const [pi, pj] of [...pairs, [old.length, toks.length]]) {
+    const gone = old.slice(i, pi).join(' '), add = toks.slice(j, pj);
+    const last = pj >= toks.length;
+    if (add.length) {
+      let first = true;
+      for (let k = 0; k < add.length;) {
+        let q = k;
+        while (q + 1 < add.length && add[q + 1].node === add[k].node) q++;
+        ev.push({ node: add[k].node, s: add[k].s, e: add[q].e, del: first && gone ? (last ? ' ' + gone : gone + ' ') : '' });
+        first = false; k = q + 1;
+      }
+    } else if (gone) {
+      if (toks.length && !last) ev.push({ node: toks[pj].node, s: toks[pj].s, e: toks[pj].s, del: gone + ' ' });
+      else if (toks.length) ev.push({ node: toks[toks.length - 1].node, s: toks[toks.length - 1].e, e: toks[toks.length - 1].e, del: ' ' + gone });
+      else ev.push({ node: null, del: gone });
+    }
     i = pi + 1; j = pj + 1;
   }
-  return out.join('');
+  const delEl = (t) => { const d = mark('del', time); d.textContent = t; return d; };
+  for (const x of ev.reverse()) {                    // last first, so earlier offsets stay valid
+    if (!x.node) { el.append(delEl(x.del)); continue; }
+    let at = x.node;
+    if (x.s > 0) at = x.node.splitText(x.s);
+    if (x.e > x.s) {
+      if (x.e - x.s < at.length) at.splitText(x.e - x.s);
+      const w = mark('ins', time);
+      at.replaceWith(w); w.append(at);
+      if (x.del) w.before(delEl(x.del));
+    } else if (x.s >= x.node.length && at === x.node) x.node.after(delEl(x.del));
+    else at.before(delEl(x.del));
+  }
+  return ev.length;
 }
 
 const topOf = (root, el) => { let t = el; while (t.parentElement && t.parentElement !== root) t = t.parentElement; return t; };
@@ -188,16 +229,8 @@ export function diffHtml(oldHtml, newHtml) {
     if (op.t === 'eq') return;
     if (op.t === 'mod') {
       const el = b[op.n], src = a[op.o];
-      if (el.querySelector(OBJ)) {
-        // Rebuilding the paragraph would lose its objects, so only changes to pictures are marked.
-        const m = markImages(src, el);
-        if (m) st.edited++;
-        if (norm(src.textContent) !== norm(el.textContent) || !m) st.unmarked++;
-        return;
-      }
-      el.innerHTML = wordDiff(norm(src.textContent), norm(el.textContent), time);
-      markImages(src, el);
-      st.edited++;
+      const marks = markText(el, norm(plain(src)), time) + markImages(src, el);
+      if (marks) st.edited++; else st.unmarked++;
     } else if (op.t === 'ins') {
       const w = mark('ins', time);
       w.append(...b[op.n].childNodes);
