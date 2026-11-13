@@ -247,7 +247,7 @@ function edgeAt(e) {
   const cell = e.target.closest && e.target.closest('td,th');
   if (!cell || !api.editor.contains(cell)) return null;
   const r = cell.getBoundingClientRect();
-  const nearRight = r.right - e.clientX <= 5, nearLeft = e.clientX - r.left <= 4;
+  const fat = e.pointerType === 'touch' ? 8 : 0, nearRight = r.right - e.clientX <= 5 + fat, nearLeft = e.clientX - r.left <= 4 + fat;
   if (!nearRight && !nearLeft) return null;
   const table = cell.closest('table'), g = gridOf(table), p = g.pos.get(cell);
   if (!p) return null;
