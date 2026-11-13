@@ -186,6 +186,24 @@ const tests = [
     if (same.changes || same.html.indexOf('class="tc"') >= 0) f.push('identical documents reported changes');
     return { fail: f, info: JSON.stringify(r.stats) };
   } },
+  { name: 'Compare marks removed table rows and cells, and added, removed and replaced pictures', async run() {
+    const { diffHtml } = await import('../js/compare.js?t=' + Date.now());
+    const I = (c) => `<img src="data:image/png;base64,${c}" alt="">`, A = I('AAAA'), B = I('BBBB'), C = I('CCCC');
+    const old = `<p>Intro text here.</p><table><tr><td>Apples</td><td>10</td></tr><tr><td>Pears</td><td>20</td></tr><tr><td>Plums</td><td>30</td></tr></table><p>${A}</p><p>Photo caption words.</p><p>Chart ${B} below</p><p>${C}</p>`;
+    const cur = `<p>Intro text here.</p><table><tr><td>Apples</td><td>10</td></tr><tr><td>Plums</td><td>35</td></tr></table><p>${B}</p><p>Photo caption words.</p><p>Chart below</p><p>${C}</p><p>${A}</p>`;
+    const r = diffHtml(old, cur), f = [];
+    const box = document.createElement('div'); box.innerHTML = r.html;
+    const rows = [...box.querySelectorAll('tr')];
+    if (rows.length !== 3) f.push('expected 3 table rows (one struck out), got ' + rows.length);
+    else if (!rows[1].querySelector('del.tc') || !/Pears/.test(rows[1].textContent) || rows[0].querySelector('.tc')) f.push('removed row not shown in place: ' + box.querySelector('table').innerHTML);
+    if (rows[2] && !/30/.test(rows[2].querySelector('del.tc') ? rows[2].querySelector('del.tc').textContent : '')) f.push('edited cell not marked');
+    if (!box.querySelector('del.tc img') ) f.push('removed picture not shown');
+    if (!box.querySelector('ins.tc img')) f.push('added picture not marked');
+    if (r.stats.unmarked) f.push('left unmarked: ' + JSON.stringify(r.stats));
+    const again = diffHtml(cur, cur);
+    if (again.changes) f.push('identical document with pictures reported changes');
+    return { fail: f, info: JSON.stringify(r.stats) };
+  } },
   { name: 'PDF export has one page per layout page, real text, links and bookmarks', async run() {
     await load(`<h1>Heading one</h1><p>Visit <a href="https://example.com/x">our site</a> and <b>read</b> this.</p><p>${lorem(1200)}</p><h2>Second</h2><p>${lorem(300)}</p>`, 1);
     const pdf = await W.eval(`import('${new URL('../js/pdf.js', location.href).href}')`), pages = (await W.eval(`import('${new URL('../js/pages.js', location.href).href}')`)).count();
