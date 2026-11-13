@@ -62,7 +62,8 @@ function insertTextbox() {
 // ---------- charts ----------
 export const TYPES = ['column', 'stacked', 'stacked100', 'bar', 'line', 'area', 'combo', 'scatter', 'bubble', 'radar', 'pie', 'donut'];
 export const MAX_SERIES = 12;
-export const PALETTE = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#6250d6', '#e34948', '#17a2b8', '#8a5a2b', '#7a8b99', '#c2185b'];
+const PALETTE0 = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#6250d6', '#e34948', '#17a2b8', '#8a5a2b', '#7a8b99', '#c2185b'];
+export const PALETTE = PALETTE0;
 const OTHER = '#9a9a9a', INK = '#1f1f1f', INK2 = '#5f5f5f', GRID = '#e6e6e6', AXIS = '#bdbdbd';
 const W = 640, H = 360, FONT = 'system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif';
 const DEMO = 'Quarter, 2025, 2026\nQ1, 120, 150\nQ2, 135, 162\nQ3, 128, 171\nQ4, 149, 190';
@@ -120,6 +121,7 @@ function legend(names, colors, y) {
 }
 
 export function renderChart(cfg) {
+  const PALETTE = PALETTE0.map((c, i) => { const own = cfg.series && cfg.series[i] && cfg.series[i].color; return /^#[0-9a-f]{6}$/i.test(own || '') ? own : c; });
   const type = TYPES.includes(cfg.type) ? cfg.type : 'column';
   const labels = cfg.labels || [], series = (cfg.series || []).slice(0, MAX_SERIES);
   const title = (cfg.title || '').trim();
@@ -137,13 +139,14 @@ export function renderChart(cfg) {
 
   if (type === 'pie' || type === 'donut') {
     const vals = (series[0] ? series[0].values : []).map((v) => Math.max(0, v));
-    let parts = labels.map((l, i) => ({ l, v: vals[i] || 0 })).filter((p) => p.v > 0);
+    const pcs = (series[0] && series[0].pointColors) || [];
+    let parts = labels.map((l, i) => ({ l, v: vals[i] || 0, c: /^#[0-9a-f]{6}$/i.test(pcs[i] || '') ? pcs[i] : PALETTE0[i] })).filter((p) => p.v > 0);
     if (parts.length > 8) { const rest = parts.slice(7); parts = [...parts.slice(0, 7), { l: 'Other', v: rest.reduce((a, p) => a + p.v, 0), other: true }]; }
     const total = parts.reduce((a, p) => a + p.v, 0) || 1;
     const cx = 190, cy = top + (H - top - 20) / 2, R = Math.min(130, (H - top - 28) / 2);
     let a0 = -Math.PI / 2;
     parts.forEach((p, i) => {
-      const a1 = a0 + (p.v / total) * Math.PI * 2, col = p.other ? OTHER : PALETTE[i];
+      const a1 = a0 + (p.v / total) * Math.PI * 2, col = p.other ? OTHER : (p.c || PALETTE[i]);
       const pt = (a) => `${f1(cx + R * Math.cos(a))},${f1(cy + R * Math.sin(a))}`;
       const tip = `<title>${x(p.l)}: ${full.format(p.v)} (${f1((p.v / total) * 100)}%)</title>`;
       body += parts.length === 1
@@ -167,7 +170,10 @@ export function renderChart(cfg) {
     const all = type === 'bubble' ? bub.flatMap((g) => g.ys) : sec ? series[0].values : series.flatMap((s) => s.values);
     const stackTot = (i) => series.reduce((a, s) => a + Math.max(0, s.values[i] || 0), 0);
     const hiV = pct100 ? 100 : type === 'stacked' ? Math.max(0, ...labels.map((_, i) => stackTot(i))) : Math.max(0, ...all);
-    const sc = scale(Math.min(0, ...all), hiV);
+    const freeMin = ['line', 'scatter', 'bubble'].includes(type);
+    const vMin = isFinite(cfg.valMin) && cfg.valMin != null && (freeMin || cfg.valMin <= 0) ? cfg.valMin : null, vMax = isFinite(cfg.valMax) && cfg.valMax != null && !pct100 ? cfg.valMax : null;
+    const lo0 = vMin != null ? vMin : Math.min(0, ...all), hi0 = vMax != null && vMax > lo0 ? vMax : hiV;
+    const sc = scale(lo0, hi0);
     const n = Math.max(1, labels.length), m = series.length || 1;
     if (type === 'scatter' || type === 'bubble') {
       const xs = labels.map((l, i) => { const v = Number(String(l).replace(/[,\s%£$€]/g, '')); return String(l).trim() !== '' && isFinite(v) ? v : i + 1; });
