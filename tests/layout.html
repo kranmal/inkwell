@@ -417,6 +417,28 @@ const tests = [
     }
     return { fail: f, info: cases.length + ' cases' };
   } },
+  { name: 'Compare marks changed, added and removed equations, and Accept all and Reject all give back the new and the old ones', async run() {
+    const { diffHtml } = await import('../js/compare.js?t=' + Date.now());
+    const e = (s) => `<span class="eq" contenteditable="false" data-eq="${s}"></span>`;
+    const old = `<p>Area is ${e('x^2')} here</p><p>Keep ${e('a+b')} going</p><p>Gone ${e('c')} there</p>`;
+    const cur = `<p>Area is ${e('x^3')} here</p><p>Keep ${e('a+b')} going</p><p>Gone there</p><p>New ${e('q')}</p>`;
+    const r = diffHtml(old, cur), f = [];
+    if (r.stats.unmarked) f.push('equation changes left unmarked: ' + JSON.stringify(r.stats));
+    if (r.stats.edited !== 1 || r.stats.removed !== 1 || r.stats.added !== 1) f.push('stats ' + JSON.stringify(r.stats));
+    const box = document.createElement('div'); box.innerHTML = r.html;
+    if (box.querySelectorAll('ins.tc > .eq').length < 2) f.push('new equations not marked inserted');
+    if (box.querySelectorAll('del.tc > .eq').length !== 2) f.push('old and removed equations not shown deleted');
+    if (diffHtml(old, old).changes) f.push('identical equations reported changes');
+    const eqs = (html) => { const b = document.createElement('div'); b.innerHTML = html; return [...b.querySelectorAll('.eq')].map((q) => q.dataset.eq).join(','); };
+    for (const [cmd, want] of [['acceptAll', eqs(cur)], ['rejectAll', eqs(old)]]) {
+      await load(r.html);
+      D.querySelector(`[data-cmd="${cmd}"]`).click();
+      await sleep(300);
+      if (ed.querySelector('ins.tc,del.tc')) f.push(cmd + ' left marks');
+      if (eqs(ed.innerHTML) !== want) f.push(cmd + ' gave equations ' + eqs(ed.innerHTML) + ', expected ' + want);
+    }
+    return { fail: f, info: JSON.stringify(r.stats) };
+  } },
   { name: 'PDF export has one page per layout page, real text, links and bookmarks', async run() {
     await load(`<h1>Heading one</h1><p>Visit <a href="https://example.com/x">our site</a> and <b>read</b> this.</p><p>${lorem(1200)}</p><h2>Second</h2><p>${lorem(300)}</p>`, 1);
     const pdf = await W.eval(`import('${new URL('../js/pdf.js', location.href).href}')`), pages = (await W.eval(`import('${new URL('../js/pages.js', location.href).href}')`)).count();
