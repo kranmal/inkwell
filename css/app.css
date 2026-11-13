@@ -406,3 +406,16 @@ body.focus .titlebar, body.focus .tabs, body.focus .ribbon, body.focus .statusba
 .eq-presets { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
 .btn.sm { height: 26px; padding: 0 8px; font-size: 12px; }
 body.protected .doc { cursor: default; }
+.acc-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 14px 8px; font-size: 13px; color: var(--muted); }
+.acc-out { padding: 0 10px 14px; overflow: auto; }
+.acc-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.acc-list li { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); cursor: pointer; font-size: 13px; }
+.acc-list li:hover, .acc-list li:focus-visible { border-color: var(--accent); }
+.acc-tag { display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 600; margin-right: 6px; background: var(--hover); }
+.acc-error .acc-tag { background: #fde4e1; color: #8a1c10; }
+.acc-warn .acc-tag { background: #fdf0d2; color: #7a4d00; }
+.acc-rule { color: var(--muted); font-size: 12px; }
+.acc-msg { margin-top: 4px; }
+.acc-fix { display: flex; gap: 6px; margin-top: 6px; }
+.acc-fix input { flex: 1; min-width: 0; height: 28px; padding: 0 8px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--paper); color: inherit; font-size: 16px; }
+.acc-flash { outline: 3px solid var(--accent); outline-offset: 2px; transition: outline-color .3s; }
