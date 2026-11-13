@@ -273,8 +273,22 @@ function liftOut(el) {
     if (!a.firstChild) a.remove();
   }
 }
+// A table or cell look from Compare (shading, alignment, borders, widths): Reject puts the old value back.
+function resolveLook(el, accept) {
+  if (!accept) {
+    const cell = el.closest('td,th'), table = el.closest('table'), d = el.dataset;
+    if (d.cellStyle !== undefined && cell) { if (d.cellStyle) cell.setAttribute('style', d.cellStyle); else cell.removeAttribute('style'); }
+    if (d.tableClass !== undefined && table) { if (d.tableClass) table.className = d.tableClass; else table.removeAttribute('class'); }
+    if (d.tableCols !== undefined && table) {
+      table.querySelectorAll(':scope > colgroup').forEach((g) => g.remove());
+      if (d.tableCols) table.insertAdjacentHTML('afterbegin', d.tableCols);
+    }
+  }
+  if (el.dataset.pad) el.remove(); else unwrap(el);
+}
 function resolveFormat(el, accept) {
   if (!el || !el.isConnected) return;
+  if (el.dataset.cellStyle !== undefined || el.dataset.tableClass !== undefined || el.dataset.tableCols !== undefined) return resolveLook(el, accept);
   if (accept) { unwrap(el); return; }
   if (el.dataset.lift) liftOut(el);
   const t = document.createElement('template');

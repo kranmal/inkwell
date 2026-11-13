@@ -596,6 +596,36 @@ const tests = [
     if (diffPage(null, {}, '', '').length) f.push('empty settings reported as a change');
     return { fail: f, info: d.length + ' differences' };
   } },
+  { name: 'Compare marks table shading, alignment, borders and column widths, and Reject all restores them', async run() {
+    const { diffHtml } = await import('../js/compare.js?t=' + Date.now());
+    const tbl = (cls, cols, bg, al) => `<table class="${cls}"><colgroup><col style="width:${cols[0]}%"><col style="width:${cols[1]}%"></colgroup><tbody><tr><td${bg ? ` style="background-color:${bg}"` : ''}>Alpha</td><td${al ? ` style="text-align:${al}"` : ''}>Beta</td></tr><tr><td>Gamma</td><td></td></tr></tbody></table>`;
+    const oldH = '<p>Intro</p>' + tbl('tb-outer', [50, 50], '', '');
+    const newH = '<p>Intro</p>' + tbl('tb-striped rep-head', [30, 70], '#ffcc00', 'right');
+    const r = diffHtml(oldH, newH), f = [];
+    if (r.stats.formatted !== 3) f.push('formatted ' + r.stats.formatted + ', expected 3 (table, shaded cell, aligned cell)');
+    await load(r.html);
+    const fcs = [...ed.querySelectorAll('span.fc')].map((x) => x.dataset.label);
+    if (!fcs.some((l) => /column widths/.test(l))) f.push('column widths not marked: ' + fcs);
+    if (!fcs.some((l) => /shading/.test(l))) f.push('shading not marked: ' + fcs);
+    if (!fcs.some((l) => /alignment/.test(l))) f.push('alignment not marked: ' + fcs);
+    D.querySelector('[data-cmd="rejectAll"]').click();
+    await sleep(250);
+    const t = ed.querySelector('table');
+    if (ed.querySelector('span.fc')) f.push('marks left after rejecting');
+    if (t.className.trim() !== 'tb-outer') f.push('table class after reject: ' + t.className);
+    if ([...t.querySelectorAll('col')].map((c) => c.style.width).join() !== '50%,50%') f.push('widths after reject: ' + [...t.querySelectorAll('col')].map((c) => c.style.width));
+    const tds = t.querySelectorAll('td');
+    if (tds[0].style.backgroundColor || tds[1].style.textAlign) f.push('cell looks not restored');
+    if (tds[0].textContent !== 'Alpha') f.push('cell text changed: ' + tds[0].textContent);
+    // Accept all keeps the new look
+    await load(r.html);
+    D.querySelector('[data-cmd="acceptAll"]').click();
+    await sleep(250);
+    const t2 = ed.querySelector('table');
+    if (!t2.classList.contains('tb-striped') || !t2.querySelector('td').style.backgroundColor) f.push('accepting lost the new look');
+    if (t2.querySelector('span.fc')) f.push('marks left after accepting');
+    return { fail: f, info: JSON.stringify(r.stats) };
+  } },
   { name: 'PDF export has one page per layout page, real text, links and bookmarks', async run() {
     await load(`<h1>Heading one</h1><p>Visit <a href="https://example.com/x">our site</a> and <b>read</b> this.</p><p>${lorem(1200)}</p><h2>Second</h2><p>${lorem(300)}</p>`, 1);
     const pdf = await W.eval(`import('${new URL('../js/pdf.js', location.href).href}')`), pages = (await W.eval(`import('${new URL('../js/pages.js', location.href).href}')`)).count();
