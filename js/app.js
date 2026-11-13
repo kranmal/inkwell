@@ -237,7 +237,7 @@ function pageDims() {
   let [w, h] = PAGES[doc.page.size] || PAGES.A4;
   if (doc.page.orient === 'landscape') [w, h] = [h, w];
   const [t, r, b, l] = MARGINS[doc.page.margins] || MARGINS.normal;
-  return { w, h, landscape: doc.page.orient === 'landscape', m: { t, r, b, l }, cols: doc.page.cols || 1, presets: MARGINS };
+  return { w, h, landscape: doc.page.orient === 'landscape', m: { t, r, b, l }, cols: doc.page.cols || 1, balance: !!doc.page.balance, presets: MARGINS };
 }
 function pageCss() {
   const d = pageDims();
@@ -253,6 +253,7 @@ function applyPage() {
   for (const [menu, key] of [['m-margins', 'margins'], ['m-orient', 'orient'], ['m-size', 'size'], ['m-cols', 'cols']]) {
     $$('button', $('#' + menu)).forEach((b) => b.classList.toggle('on', b.dataset.val === String(doc.page[key])));
   }
+  const bb = $('#m-cols [data-cmd="colBalance"]'); if (bb) bb.classList.toggle('on', !!doc.page.balance);
   pagesMod.layout();
   updateStats(); placeImgBox();
 }
@@ -1152,6 +1153,7 @@ function run(cmd, val, el) {
     case 'orient': doc.page.orient = val; applyPage(); changed(true); break;
     case 'pageSize': doc.page.size = val; applyPage(); changed(true); break;
     case 'cols': doc.page.cols = Number(val); applyPage(); changed(true); break;
+    case 'colBalance': doc.page.balance = !doc.page.balance; applyPage(); changed(true); break;
     case 'lang': prefs.lang = val; savePrefs(); applyLang(); proof.setLang(val); renderProof(); break;
     case 'wordCount': wordCount(); break;
     case 'readAloud': readAloud(); break;

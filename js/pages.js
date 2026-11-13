@@ -320,6 +320,23 @@ function labelBreaks() {
 
 export function layout() {
   if (!api || !api.doc || !sheets) return;
+  const d0 = api.pageDims();
+  if (!(d0.balance && d0.cols > 1)) return layoutPass(null);
+  // Balance the last page's columns: lay out once, work out how much text sits on the last page, then lay out again with that
+  // page's columns shortened to an even share. If shortening pushes anything onto a new page, try a little taller, then give up.
+  const first = layoutPass(null);
+  if (!first || first.colH - first.share < 2) return;
+  const lh = first.lh || 18;
+  for (let extra = 0; extra < 6; extra++) {
+    const cut = first.colH - Math.min(first.colH, first.share + extra * lh);
+    if (cut < 2) break;
+    const r = layoutPass({ page: first.kk, cut });
+    if (r && r.kk === first.kk) return;
+  }
+  layoutPass(null);
+}
+
+function layoutPass(bal) {
   strip();
   labelBreaks();
   if (decoLayer) decoLayer.textContent = '';
@@ -374,6 +391,8 @@ export function layout() {
     const colH = H - mt - mb;
     const sel0 = saveSel();
     let c = 0, kk = 0, SS = 0, pend2 = null, css2 = '', first = true;
+    let lastB = 0, lastPg = 0, lineH = 0;
+    const bottomAt = (k) => k * P + H - mb - (bal && bal.page === k ? bal.cut : 0);
     secs = [];
     const advance = () => {
       c++;
@@ -384,7 +403,7 @@ export function layout() {
     const splitCols = (u) => {
       const lhPx = parseFloat(getComputedStyle(u.el).lineHeight) / sc;
       const lh = (lhPx > 0 ? lhPx : (parseFloat(getComputedStyle(u.el).fontSize) / sc) * 1.3);
-      const bottom = () => kk * P + H - mb, top = () => kk * P + mt;
+      const bottom = () => bottomAt(kk), top = () => kk * P + mt;
       let dy = 0, last = -1, pieceTop = u.t, did = 0, c0 = c, kk0 = kk, SS0 = SS;
       own = null;
       while (u.b + dy + SS0 > bottom() + 0.5) {
@@ -416,7 +435,7 @@ export function layout() {
         const lp = parseFloat(getComputedStyle(cl).lineHeight) / sc;
         return [cl, { last: -1, dy: 0, top: u.t, lh: lp > 0 ? lp : (parseFloat(getComputedStyle(cl).fontSize) / sc) * 1.3 }];
       }));
-      const bottom = () => kk * P + H - mb, top = () => kk * P + mt;
+      const bottom = () => bottomAt(kk), top = () => kk * P + mt;
       const py = (q) => (q.top - pr.top) / sc;
       const c0 = c, kk0 = kk, SS0 = SS;
       let did = 0, guard = 0;
@@ -452,7 +471,7 @@ export function layout() {
       const pieces = [{ kk: kk0, c: c0, y0: u.t + SS0, first: true }, ...segs.map((sg) => ({ kk: sg.kk, c: sg.c, y0: sg.kk * P + mt }))];
       const csc = [...u.el.cells].map((cl) => ({ r: cl.getBoundingClientRect(), cs: getComputedStyle(cl) }));
       pieces.forEach((pc, i) => {
-        const last = i === pieces.length - 1, y1 = last ? rowEnd : pc.kk * P + H - mb;
+        const last = i === pieces.length - 1, y1 = last ? rowEnd : bottomAt(pc.kk);
         csc.forEach(({ r, cs }) => {
           const bd = (s) => `${cs['border' + s + 'Width']} ${cs['border' + s + 'Style']} ${cs['border' + s + 'Color']}`;
           const b = document.createElement('div');
@@ -477,7 +496,7 @@ export function layout() {
         if (x || SS) css2 += `${u.sel}{position:relative;left:${x.toFixed(2)}px;top:${SS.toFixed(2)}px}`;
         continue;
       }
-      const top = () => kk * P + mt, bottom = () => kk * P + H - mb;
+      const top = () => kk * P + mt, bottom = () => bottomAt(kk);
       if (first) { first = false; SS = 0; }
       else if (force || u.forced) { if (c !== 0 || (u.t + SS) > top() + 1) { c = cols - 1; advance(); } SS = top() - u.t; }
       else if (u.b + SS > bottom() + 0.5 && !((u.split || tallRow(u)) && trySplitCols(u))) { if (u.t + SS > top() + 1) { advance(); SS = top() - u.t; } }
@@ -492,6 +511,10 @@ export function layout() {
       }
       const x = own ? own.x : c * (colW + gapX), ss = own ? own.ss : SS;
       if (x || ss) css2 += `${u.sel}{position:relative;left:${x.toFixed(2)}px;top:${ss.toFixed(2)}px}`;
+      // where the text on the current page ends (the bottom of the lowest block placed in the column being filled)
+      if (kk !== lastPg) { lastPg = kk; lastB = 0; }
+      lastB = Math.max(lastB, u.b + ss);
+      if (!lineH) { const l = parseFloat(getComputedStyle(u.el).lineHeight) / sc; if (l > 0) lineH = l; }
     }
     n = kk + 1;
     const total = n * H + (n - 1) * GAP;
@@ -501,7 +524,8 @@ export function layout() {
     if (sel0 && api.editor.querySelector('.pgs-part')) restoreSel(sel0);
     drawSheets(n, false);
     drawHf(d, false);
-    return;
+    // ask for a balancing pass: text on the last page = the columns filled before this one + the part of this one that is used
+    return { kk, colH, lh: lineH, share: Math.ceil(((c * colH + Math.max(0, lastB - (kk * P + mt))) / cols) / (lineH || 18)) * (lineH || 18) };
   }
   let S = 0, k = 0, prevB = mt, css = '', pend = null, carry = 0, tblS0 = 0, curT = null, tblR = 0;
   const newPage = (i, L, m) => { const dm = dimsFor(L), prev = pgs[i - 1]; return { top: prev ? prev.top + prev.h + GAP : 0, h: dm.h * MM, w: dm.w * MM, land: L, m }; };

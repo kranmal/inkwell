@@ -1070,6 +1070,35 @@ const tests = [
     if (!/>100</.test(renderChart(got[1]))) f.push('axis top of 100 not drawn');
     return { fail: f, info: 'ok' };
   } },
+  { name: 'Balancing the last page evens out its columns, and is off by default', async run() {
+    const f = [];
+    const paras = Array.from({ length: 34 }, (_, i) => `<p>Paragraph ${i + 1}. The quick brown fox jumps over the lazy dog and keeps running across the field until the end.</p>`).join('');
+    const lastPage = () => {
+      const sh = sheetsEl().children[0].getBoundingClientRect().height, top = page.getBoundingClientRect().bottom - sh;
+      const rs = textRects().filter((q) => q.t >= top - 1);
+      const mid = page.getBoundingClientRect().left + page.getBoundingClientRect().width / 2;
+      const L = rs.filter((q) => q.l < mid), R = rs.filter((q) => q.l >= mid);
+      const bot = (a) => a.length ? Math.max(...a.map((q) => q.b)) : 0;
+      return { L: L.length, R: R.length, gap: Math.abs(bot(L) - bot(R)), h: pageH() };
+    };
+    const btn = D.querySelector('#m-cols [data-cmd="colBalance"]');
+    if (btn.classList.contains('on')) { btn.click(); await settle(); }   // the test frame keeps its own storage between runs
+    await load(paras, 2);
+    const off = lastPage();
+    btn.click();
+    await settle();
+    const on = lastPage();
+    D.querySelector('#m-cols [data-cmd="colBalance"]').click();
+    await settle();
+    const off2 = lastPage();
+    await setCols(1);
+    if (off.R !== 0 && off.gap < 60) { /* content happened to fill both columns; test text too short to prove anything */ f.push('setup: last page already balanced'); }
+    if (!on.L || !on.R) f.push(`balanced last page should have text in both columns (${on.L}/${on.R})`);
+    if (on.gap > 60) f.push(`balanced columns differ by ${Math.round(on.gap)}px`);
+    if (on.h !== off.h) f.push(`balancing changed the page count (${off.h} -> ${on.h})`);
+    if (off2.R !== off.R || off2.h !== off.h) f.push('turning balance off did not restore the layout');
+    return { fail: f, info: `off ${off.L}/${off.R} gap ${Math.round(off.gap)}, on ${on.L}/${on.R} gap ${Math.round(on.gap)}` };
+  } },
   { name: 'A text box keeps its fill and outline through a Word round trip', async run() {
     const { exportDocx, loadScript } = await import('../js/docx.js?t=' + Date.now());
     const { prepare } = await import('../js/docximport.js?t=' + Date.now());
