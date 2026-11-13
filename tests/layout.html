@@ -674,6 +674,38 @@ const tests = [
     if (!fc2 || fc2.dataset.author !== 'Sam' || fc2.dataset.was !== '<strong>this</strong>') f.push('removed bold came back as ' + (fc2 ? fc2.outerHTML : 'nothing'));
     return { fail: f, info: count(/<w:ins /g) + ' ins, ' + count(/<w:del /g) + ' del' };
   } },
+  { name: 'Compare header and footer changes can be accepted or rejected', async run() {
+    const { diffPage, hfNote } = await import('../js/compare.js?t=' + Date.now());
+    const f = [];
+    const setHf = async (o) => {
+      const dlg = D.querySelector('#dlg-hf');
+      D.querySelector('#hf-header').value = o.header; D.querySelector('#hf-footer').value = o.footer;
+      D.querySelector('#hf-num').value = o.num;
+      dlg.returnValue = 'ok'; dlg.dispatchEvent(new Event('close'));
+      await sleep(300);
+    };
+    const zones = () => [...D.querySelectorAll('.hf-layer .hf-zone')].map((z) => z.textContent.trim()).join('|');
+    const sect = (o) => `<div class="page-break sect-break" contenteditable="false" data-sect='${JSON.stringify(o)}'></div>`;
+    const run = async (accept) => {
+      await setHf({ header: 'Final', footer: 'Acme', num: 'bottom-right' });
+      const pg = diffPage({ header: 'Draft', footer: 'Acme', num: 'bottom-center' }, { header: 'Final', footer: 'Acme', num: 'bottom-right' }, '<p>a</p>' + sect({ header: 'Old' }), '<p>a</p>' + sect({ header: 'New' }));
+      await load(hfNote(pg) + '<p>a</p>' + sect({ header: 'New' }) + '<p>b</p>');
+      D.querySelector(`[data-cmd="${accept ? 'acceptAll' : 'rejectAll'}"]`).click();
+      await sleep(400);
+      return pg.length;
+    };
+    const n = await run(true);
+    if (n !== 3) f.push('expected 3 differences, got ' + n);
+    if (ed.querySelector('[data-compare-note]')) f.push('the note stayed after accepting every line');
+    if (!/Final/.test(zones())) f.push('accepting changed the header: ' + zones());
+    if (!/New/.test(ed.querySelector('.sect-break').dataset.sect)) f.push('accepting changed the section header');
+    await run(false);
+    if (ed.querySelector('[data-compare-note]')) f.push('the note stayed after rejecting every line');
+    if (!/Draft/.test(zones()) || /Final/.test(zones())) f.push('rejecting did not restore the header: ' + zones());
+    if (!/Old/.test(ed.querySelector('.sect-break').dataset.sect)) f.push('rejecting did not restore the section header: ' + ed.querySelector('.sect-break').dataset.sect);
+    await setHf({ header: '', footer: '', num: 'none' });
+    return { fail: f, info: zones() };
+  } },
   { name: 'PDF export has one page per layout page, real text, links and bookmarks', async run() {
     await load(`<h1>Heading one</h1><p>Visit <a href="https://example.com/x">our site</a> and <b>read</b> this.</p><p>${lorem(1200)}</p><h2>Second</h2><p>${lorem(300)}</p>`, 1);
     const pdf = await W.eval(`import('${new URL('../js/pdf.js', location.href).href}')`), pages = (await W.eval(`import('${new URL('../js/pages.js', location.href).href}')`)).count();

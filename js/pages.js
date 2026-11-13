@@ -6,6 +6,7 @@ const GAP = 24;
 const HF0 = { header: '', headerAlign: 'left', footer: '', footerAlign: 'left', num: 'none', numFormat: '1', firstDiff: false };
 const ALIGNS = ['left', 'center', 'right'];
 
+export const resetHf = () => { hfSig = ''; };
 export const hf = () => ({ ...HF0, ...((api && api.doc && api.doc.hf) || {}) });
 export const count = () => n;
 export const sections = () => secs;
