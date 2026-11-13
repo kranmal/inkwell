@@ -114,7 +114,7 @@ function cache(el) {
   const len = Math.max(pts.length, n ? Number(n.getAttribute('val')) || 0 : 0);
   return Array.from({ length: len }, (_, i) => pts[i] == null ? '' : pts[i]);
 }
-const KINDS = { barChart: 'column', bar3DChart: 'column', lineChart: 'line', line3DChart: 'line', areaChart: 'area', area3DChart: 'area', pieChart: 'pie', pie3DChart: 'pie', doughnutChart: 'donut', scatterChart: 'scatter', radarChart: 'radar' };
+const KINDS = { barChart: 'column', bar3DChart: 'column', lineChart: 'line', line3DChart: 'line', areaChart: 'area', area3DChart: 'area', pieChart: 'pie', pie3DChart: 'pie', doughnutChart: 'donut', scatterChart: 'scatter', bubbleChart: 'bubble', radarChart: 'radar' };
 export function chartConfig(doc) {
   const plot = cFirst(doc.documentElement, 'plotArea');
   if (!plot) return null;
@@ -130,16 +130,23 @@ export function chartConfig(doc) {
   if (type === 'column' && groups.some((g) => g.localName === 'lineChart')) type = 'combo';
   const series = [];
   let labels = [];
+  const xy = type === 'scatter' || type === 'bubble';
   groups.forEach((g, gi) => {
     for (const ser of [...g.children].filter((c) => c.localName === 'ser')) {
       const name = cache(cFirst(ser, 'tx'));
-      const cat = cFirst(ser, type === 'scatter' ? 'xVal' : 'cat');
+      const cat = cFirst(ser, xy ? 'xVal' : 'cat');
       const lab = cat ? cache(cFirst(cat, 'strCache') || cFirst(cat, 'numCache') || cFirst(cat, 'strLit') || cFirst(cat, 'numLit')) : null;
-      const valEl = cFirst(ser, type === 'scatter' ? 'yVal' : 'val');
+      const valEl = cFirst(ser, xy ? 'yVal' : 'val');
       const vals = valEl ? cache(cFirst(valEl, 'numCache') || cFirst(valEl, 'numLit')) : null;
       if (!vals) continue;
       if (lab && lab.length > labels.length) labels = lab;
-      series.push({ name: (name && name[0]) || `Series ${series.length + 1}`, values: vals.map((v) => { const n = parseFloat(v); return isFinite(n) ? n : 0; }) });
+      const num = (a) => a.map((v) => { const n = parseFloat(v); return isFinite(n) ? n : 0; });
+      const nm = (name && name[0]) || `Series ${series.length + 1}`;
+      series.push({ name: nm, values: num(vals) });
+      if (type === 'bubble') {   // a size series only when the sizes are real data (a literal is Inkwell's "equal bubbles")
+        const bs = cFirst(ser, 'bubbleSize'), sz = bs && cFirst(bs, 'numRef') ? cache(cFirst(bs, 'numCache')) : null;
+        if (sz) series.push({ name: `${nm} (size)`, values: num(sz) });
+      }
     }
   });
   if (!series.length) return null;
@@ -153,11 +160,17 @@ export function chartConfig(doc) {
   const cfg = { type, title, labels, series: series.slice(0, 12) };
   const shows = (el) => { const v = cFirst(el, 'showVal'), pc = cFirst(el, 'showPercent'); return (v && cVal(v) !== '0' && cVal(v) !== 'false') || (pc && cVal(pc) !== '0' && cVal(pc) !== 'false'); };
   if (groups.some((g) => cKids(g, 'dLbls').some(shows))) cfg.dataLabels = true;
+  if (type === 'combo') {   // the lines on their own pair of axes means a secondary value axis
+    const ids = (g) => cKids(g, 'axId').map(cVal).join();
+    const bar = groups.find((g) => g.localName.startsWith('bar')), line = groups.find((g) => g.localName === 'lineChart');
+    if (bar && line && ids(bar) !== ids(line)) cfg.secondary = true;
+  }
   for (const ax of [...plot.children].filter((c) => c.namespaceURI === CNS && /Ax$/.test(c.localName))) {
     const t = words([...ax.children].find((c) => c.localName === 'title'));
     if (!t) continue;
-    const isCat = ax.localName !== 'valAx' || (type === 'scatter' && cVal(cFirst(ax, 'axPos')) === 'b');
-    if (isCat) cfg.catTitle = t; else cfg.valTitle = t;
+    const isCat = ax.localName !== 'valAx' || (xy && cVal(cFirst(ax, 'axPos')) === 'b');
+    if (ax.localName === 'valAx' && type === 'combo' && cfg.secondary && cVal(cFirst(ax, 'crosses')) === 'max') cfg.secTitle = t;
+    else if (isCat) cfg.catTitle = t; else cfg.valTitle = t;
   }
   return cfg;
 }

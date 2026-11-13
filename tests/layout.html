@@ -203,6 +203,9 @@ const tests = [
     const { prepare } = await import('../js/docximport.js?t=' + Date.now());
     const cfgs = ['column', 'stacked', 'bar', 'line', 'area', 'combo', 'scatter', 'radar', 'pie', 'donut'].map((type, i) => ({ type, title: 'T' + i, labels: type === 'scatter' ? ['1', '2.5', '4'] : ['a', 'b', 'c'], series: [{ name: 'S1', values: [1, 3, 2.5] }, ...(type === 'pie' || type === 'donut' ? [] : [{ name: 'S2', values: [2, 2, 4] }])] }));
     cfgs.push(
+      { type: 'bubble', title: 'B', labels: ['1', '2.5', '4'], series: [{ name: 'Y1', values: [1, 3, 2.5] }, { name: 'Y1 (size)', values: [10, 40, 5] }, { name: 'Y2', values: [2, 2, 4] }], dataLabels: true, catTitle: 'Age', valTitle: 'Pay' },
+      { type: 'combo', title: 'Sec', labels: ['a', 'b', 'c'], series: [{ name: 'Revenue', values: [100, 300, 250] }, { name: 'Margin', values: [0.2, 0.35, 0.3] }], secondary: true, catTitle: 'Q', valTitle: 'Money', secTitle: 'Percent' });
+    cfgs.push(
       { type: 'stacked100', title: 'P', labels: ['a', 'b', 'c'], series: [{ name: 'S1', values: [1, 3, 2.5] }, { name: 'S2', values: [2, 2, 4] }], dataLabels: true, catTitle: 'Region', valTitle: 'Share' },
       { type: 'column', title: 'L', labels: ['a', 'b', 'c'], series: [{ name: 'S1', values: [1, 3, 2.5] }, { name: 'S2', values: [2, 2, 4] }], dataLabels: true },
       { type: 'bar', title: '', labels: ['a', 'b', 'c'], series: [{ name: 'S1', values: [1, 3, 2.5] }, { name: 'S2', values: [2, 2, 4] }], catTitle: 'Team', valTitle: 'Hours' },
@@ -215,6 +218,11 @@ const tests = [
     if (!/font-size="10"[^>]*>2\.5<\/text>/.test(drawn[1])) fx.push('data labels not drawn');
     if (!/Hours/.test(drawn[2]) || !/Team/.test(drawn[2])) fx.push('bar axis titles missing');
     if (!/%<\/text>/.test(drawn[4])) fx.push('pie data labels missing');
+    const bubSvg = renderChart(cfgs[cfgs.length - 7]), secSvg = renderChart(cfgs[cfgs.length - 6]);
+    const radii = [...bubSvg.matchAll(/<circle[^>]* r="([\d.]+)"/g)].map((m) => +m[1]);
+    if (radii.length !== 6 || Math.max(...radii) <= Math.min(...radii)) fx.push('bubble sizes not drawn: ' + radii);
+    if (!/Percent/.test(secSvg) || !/rotate\(90\)/.test(secSvg) || !/>0\.4<\/text>|>0\.35<\/text>/.test(secSvg)) fx.push('secondary axis title or ticks missing');
+    if (/>0\.4<\/text>/.test(renderChart({ ...cfgs[cfgs.length - 6], secondary: false }))) fx.push('secondary axis drawn when off');
     const root = document.createElement('div');
     root.innerHTML = '<p>Hello</p>' + cfgs.map((c) => `<figure class="chart" data-chart='${JSON.stringify(c)}'></figure>`).join('') + '<p>End</p>';
     const JSZip = await loadScript('../vendor/jszip.min.js', 'JSZip'), mammoth = await loadScript('../vendor/mammoth.browser.min.js', 'mammoth');
