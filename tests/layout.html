@@ -202,6 +202,19 @@ const tests = [
     const { exportDocx, loadScript } = await import('../js/docx.js?t=' + Date.now());
     const { prepare } = await import('../js/docximport.js?t=' + Date.now());
     const cfgs = ['column', 'stacked', 'bar', 'line', 'area', 'combo', 'scatter', 'radar', 'pie', 'donut'].map((type, i) => ({ type, title: 'T' + i, labels: type === 'scatter' ? ['1', '2.5', '4'] : ['a', 'b', 'c'], series: [{ name: 'S1', values: [1, 3, 2.5] }, ...(type === 'pie' || type === 'donut' ? [] : [{ name: 'S2', values: [2, 2, 4] }])] }));
+    cfgs.push(
+      { type: 'stacked100', title: 'P', labels: ['a', 'b', 'c'], series: [{ name: 'S1', values: [1, 3, 2.5] }, { name: 'S2', values: [2, 2, 4] }], dataLabels: true, catTitle: 'Region', valTitle: 'Share' },
+      { type: 'column', title: 'L', labels: ['a', 'b', 'c'], series: [{ name: 'S1', values: [1, 3, 2.5] }, { name: 'S2', values: [2, 2, 4] }], dataLabels: true },
+      { type: 'bar', title: '', labels: ['a', 'b', 'c'], series: [{ name: 'S1', values: [1, 3, 2.5] }, { name: 'S2', values: [2, 2, 4] }], catTitle: 'Team', valTitle: 'Hours' },
+      { type: 'scatter', title: 'X', labels: ['1', '2.5', '4'], series: [{ name: 'S1', values: [1, 3, 2.5] }, { name: 'S2', values: [2, 2, 4] }], catTitle: 'Dose', valTitle: 'Response' },
+      { type: 'pie', title: 'Pie', labels: ['a', 'b', 'c'], series: [{ name: 'S1', values: [1, 3, 2.5] }], dataLabels: true });
+    // the renderer must draw the new options without error
+    const { renderChart } = await import('../js/objects.js?t=' + Date.now());
+    const drawn = cfgs.slice(-5).map((c) => renderChart(c)), fx = [];
+    if (!/100%/.test(drawn[0]) || !/Region/.test(drawn[0]) || !/Share/.test(drawn[0])) fx.push('100% stacked chart lacks % axis or axis titles');
+    if (!/font-size="10"[^>]*>2\.5<\/text>/.test(drawn[1])) fx.push('data labels not drawn');
+    if (!/Hours/.test(drawn[2]) || !/Team/.test(drawn[2])) fx.push('bar axis titles missing');
+    if (!/%<\/text>/.test(drawn[4])) fx.push('pie data labels missing');
     const root = document.createElement('div');
     root.innerHTML = '<p>Hello</p>' + cfgs.map((c) => `<figure class="chart" data-chart='${JSON.stringify(c)}'></figure>`).join('') + '<p>End</p>';
     const JSZip = await loadScript('../vendor/jszip.min.js', 'JSZip'), mammoth = await loadScript('../vendor/mammoth.browser.min.js', 'mammoth');
@@ -209,7 +222,7 @@ const tests = [
     const rich = await prepare(JSZip, await blob.arrayBuffer());
     const box = document.createElement('div');
     box.innerHTML = rich.finish((await mammoth.convertToHtml({ arrayBuffer: rich.buffer })).value);
-    const got = [...box.querySelectorAll('figure.chart')].map((x) => JSON.parse(x.dataset.chart)), f = [];
+    const got = [...box.querySelectorAll('figure.chart')].map((x) => JSON.parse(x.dataset.chart)), f = [...fx];
     if (got.length !== cfgs.length) f.push(`expected ${cfgs.length} charts, got ${got.length}`);
     cfgs.forEach((c, i) => { if (JSON.stringify(c) !== JSON.stringify(got[i])) f.push(`${c.type} changed: ${JSON.stringify(got[i])}`); });
     return { fail: f, info: got.length + ' charts' };

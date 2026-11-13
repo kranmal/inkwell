@@ -125,7 +125,7 @@ export function chartConfig(doc) {
   if (first.localName.startsWith('bar')) {
     const bar = cVal(cFirst(first, 'barDir')) === 'bar';
     const grouping = cVal(cFirst(first, 'grouping'));
-    type = bar ? 'bar' : (grouping === 'stacked' || grouping === 'percentStacked') ? 'stacked' : 'column';
+    type = bar ? 'bar' : grouping === 'percentStacked' ? 'stacked100' : grouping === 'stacked' ? 'stacked' : 'column';
   }
   if (type === 'column' && groups.some((g) => g.localName === 'lineChart')) type = 'combo';
   const series = [];
@@ -146,9 +146,20 @@ export function chartConfig(doc) {
   const n = Math.max(...series.map((s) => s.values.length));
   labels = Array.from({ length: n }, (_, i) => labels[i] != null && labels[i] !== '' ? String(labels[i]) : String(i + 1));
   for (const s of series) while (s.values.length < n) s.values.push(0);
-  const t = cFirst(doc.documentElement, 'title');
-  const title = t ? [...t.getElementsByTagNameNS('http://schemas.openxmlformats.org/drawingml/2006/main', 't')].map((x) => x.textContent).join('') : '';
-  return { type, title: title.trim(), labels, series: series.slice(0, 12) };
+  const A = 'http://schemas.openxmlformats.org/drawingml/2006/main';
+  const words = (t) => (t ? [...t.getElementsByTagNameNS(A, 't')].map((x) => x.textContent).join('').trim() : '');
+  const chart = cFirst(doc.documentElement, 'chart');
+  const title = words([...(chart ? chart.children : [])].find((c) => c.namespaceURI === CNS && c.localName === 'title'));
+  const cfg = { type, title, labels, series: series.slice(0, 12) };
+  const shows = (el) => { const v = cFirst(el, 'showVal'), pc = cFirst(el, 'showPercent'); return (v && cVal(v) !== '0' && cVal(v) !== 'false') || (pc && cVal(pc) !== '0' && cVal(pc) !== 'false'); };
+  if (groups.some((g) => cKids(g, 'dLbls').some(shows))) cfg.dataLabels = true;
+  for (const ax of [...plot.children].filter((c) => c.namespaceURI === CNS && /Ax$/.test(c.localName))) {
+    const t = words([...ax.children].find((c) => c.localName === 'title'));
+    if (!t) continue;
+    const isCat = ax.localName !== 'valAx' || (type === 'scatter' && cVal(cFirst(ax, 'axPos')) === 'b');
+    if (isCat) cfg.catTitle = t; else cfg.valTitle = t;
+  }
+  return cfg;
 }
 // r:id of each chart in word/document.xml -> config.
 async function readCharts(zip) {
