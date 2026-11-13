@@ -103,35 +103,70 @@ function mark(tag, time) {
   return el;
 }
 
-// Text of an element without its objects (footnote marks, equations, field results and so on).
-const plain = (el) => {
-  const out = [], walk = (n) => {
-    for (const c of n.childNodes) {
-      if (c.nodeType === 3) out.push(c.textContent);
-      else if (c.nodeType === 1 && !c.matches(OBJ)) walk(c);
-    }
-  };
-  walk(el);
-  return out.join('');
+// ---------- inline formatting ----------
+// A word's look is the set of formatting that wraps it, between the word and its paragraph.
+const FTAG = { B: 'b', STRONG: 'b', I: 'i', EM: 'i', U: 'u', S: 's', STRIKE: 's', SUB: 'sub', SUP: 'sup', MARK: 'mark' };
+const FNAME = { b: 'Bold', i: 'Italic', u: 'Underline', s: 'Strikethrough', sub: 'Subscript', sup: 'Superscript', mark: 'Highlight', color: 'Font colour', bg: 'Highlight', font: 'Font', size: 'Font size' };
+const scratch = document.createElement('span');
+const css = (el, prop) => { const v = el.style && el.style.getPropertyValue(prop); if (!v) return ''; scratch.style.cssText = ''; scratch.style.setProperty(prop, v); return scratch.style.getPropertyValue(prop).toLowerCase(); };
+function looks(node, root) {
+  const set = new Set();
+  for (let e = node.parentElement; e && e !== root; e = e.parentElement) {
+    if (FTAG[e.tagName]) set.add(FTAG[e.tagName]);
+    const w = css(e, 'font-weight'), fs = css(e, 'font-style'), td = css(e, 'text-decoration') + ' ' + css(e, 'text-decoration-line'), va = css(e, 'vertical-align');
+    if (w === 'bold' || +w >= 600) set.add('b');
+    if (fs === 'italic' || fs === 'oblique') set.add('i');
+    if (/underline/.test(td)) set.add('u');
+    if (/line-through/.test(td)) set.add('s');
+    if (va === 'sub' || va === 'super') set.add(va === 'sub' ? 'sub' : 'sup');
+    for (const [k, prop] of [['color', 'color'], ['bg', 'background-color'], ['font', 'font-family'], ['size', 'font-size']]) { const v = css(e, prop); if (v && !set.has(k)) set.add(k + '=' + v); }
+  }
+  return set;
+}
+const lookKey = (set) => [...set].sort().join('|');
+const lookDiff = (x, y) => {
+  const names = new Set();
+  for (const t of [...x].filter((q) => !y.has(q)).concat([...y].filter((q) => !x.has(q)))) names.add(FNAME[t.split('=')[0]] || 'Formatting');
+  return [...names].join(', ') || 'Formatting';
 };
 
-// Word-level markup of one edited paragraph, done in place so its bold, italic, links and objects are kept.
-// New words are wrapped as insertions where they sit; removed words appear as deletions in their place.
-// Returns how many marks were made.
-function markText(el, oldText, time) {
-  const toks = [];                                   // words of the new paragraph, with where they are
+// The words of a paragraph, outside its objects, each with its text node, offsets and look.
+function wordsOf(el) {
+  const toks = [], seen = new Map();
   const walk = (n) => {
     for (const c of [...n.childNodes]) {
       if (c.nodeType === 3) { for (const m of c.textContent.matchAll(/\S+/g)) toks.push({ node: c, s: m.index, e: m.index + m[0].length, w: m[0] }); } else if (c.nodeType === 1 && !c.matches(OBJ)) walk(c);
     }
   };
   walk(el);
-  const old = oldText.split(' ').filter(Boolean);
-  const pairs = align(old.length, toks.length, (i, j) => (old[i] === toks[j].w ? 1 : 0)) || [];
-  const ev = [];                                     // { node, s, e, del }: wrap [s,e) as inserted, put `del` before it
-  let i = 0, j = 0;
+  for (const t of toks) {
+    const p = t.node.parentElement;
+    if (!seen.has(p)) { const l = looks(t.node, el); seen.set(p, [l, lookKey(l)]); }
+    [t.look, t.key] = seen.get(p);
+  }
+  return toks;
+}
+
+// What a run of old words looked like, as HTML: their text inside copies of the formatting that wrapped them.
+function wasHtml(src, run) {
+  let n = document.createTextNode(run.map((t) => t.w).join(' '));
+  for (let e = run[0].node.parentElement; e && e !== src; e = e.parentElement) { const c = e.cloneNode(false); c.append(n); n = c; }
+  const d = document.createElement('div');
+  d.append(n);
+  return d.innerHTML;
+}
+
+// Word-level markup of one edited paragraph, done in place so its links and objects are kept.
+// New words are wrapped as insertions where they sit; removed words appear as deletions in their place;
+// words that stayed but changed look (bold, italic, colour and so on) are wrapped as a formatting change.
+// Returns how many text marks and how many formatting marks were made.
+function markText(el, src, time) {
+  const toks = wordsOf(el), old = wordsOf(src);
+  const pairs = align(old.length, toks.length, (i, j) => (old[i].w === toks[j].w ? 1 : 0)) || [];
+  const ev = [];   // { node, s, e, del }: wrap [s,e) as inserted and put `del` before it; or { fc }: a formatting change
+  let i = 0, j = 0, text = 0, fmt = 0, lastFc = null;
   for (const [pi, pj] of [...pairs, [old.length, toks.length]]) {
-    const gone = old.slice(i, pi).join(' '), add = toks.slice(j, pj);
+    const gone = old.slice(i, pi).map((t) => t.w).join(' '), add = toks.slice(j, pj);
     const last = pj >= toks.length;
     if (add.length) {
       let first = true;
@@ -141,10 +176,23 @@ function markText(el, oldText, time) {
         ev.push({ node: add[k].node, s: add[k].s, e: add[q].e, del: first && gone ? (last ? ' ' + gone : gone + ' ') : '' });
         first = false; k = q + 1;
       }
+      text++;
     } else if (gone) {
       if (toks.length && !last) ev.push({ node: toks[pj].node, s: toks[pj].s, e: toks[pj].s, del: gone + ' ' });
       else if (toks.length) ev.push({ node: toks[toks.length - 1].node, s: toks[toks.length - 1].e, e: toks[toks.length - 1].e, del: ' ' + gone });
       else ev.push({ node: null, del: gone });
+      text++;
+    }
+    if (pi < old.length) {
+      const o = old[pi], n = toks[pj];
+      if (o.key !== n.key) {
+        if (lastFc && lastFc.pi === pi - 1 && lastFc.pj === pj - 1 && lastFc.ev.node === n.node && lastFc.ev.key === o.key + '>' + n.key) {
+          lastFc.ev.e = n.e; lastFc.ev.run.push(o); lastFc.pi = pi; lastFc.pj = pj;
+        } else {
+          const x = { node: n.node, s: n.s, e: n.e, fc: true, run: [o], label: lookDiff(o.look, n.look), key: o.key + '>' + n.key };
+          ev.push(x); lastFc = { ev: x, pi, pj }; fmt++;
+        }
+      }
     }
     i = pi + 1; j = pj + 1;
   }
@@ -153,6 +201,15 @@ function markText(el, oldText, time) {
     if (!x.node) { el.append(delEl(x.del)); continue; }
     let at = x.node;
     if (x.s > 0) at = x.node.splitText(x.s);
+    if (x.fc) {
+      if (x.e - x.s < at.length) at.splitText(x.e - x.s);
+      let top = at;                                  // take in the formatting around the words when it holds nothing else
+      while (top.parentElement && top.parentElement !== el && (FTAG[top.parentElement.tagName] || top.parentElement.tagName === 'SPAN') && !top.parentElement.matches('.fc,.cm,.tc') && norm(top.parentElement.textContent) === norm(at.textContent)) top = top.parentElement;
+      const w = document.createElement('span');
+      w.className = 'fc'; w.dataset.author = AUTHOR; w.dataset.time = String(time); w.dataset.label = x.label; w.dataset.was = wasHtml(src, x.run);
+      top.replaceWith(w); w.append(top);
+      continue;
+    }
     if (x.e > x.s) {
       if (x.e - x.s < at.length) at.splitText(x.e - x.s);
       const w = mark('ins', time);
@@ -161,7 +218,7 @@ function markText(el, oldText, time) {
     } else if (x.s >= x.node.length && at === x.node) x.node.after(delEl(x.del));
     else at.before(delEl(x.del));
   }
-  return ev.length;
+  return { text, fmt };
 }
 
 const topOf = (root, el) => { let t = el; while (t.parentElement && t.parentElement !== root) t = t.parentElement; return t; };
@@ -171,7 +228,7 @@ export function diffHtml(oldHtml, newHtml) {
   const A = parse(oldHtml), B = parse(newHtml), time = Date.now();
   const a = leaves(A), b = leaves(B);
   const ops = pairUp(a, b);
-  const st = { added: 0, removed: 0, edited: 0, unmarked: 0 };
+  const st = { added: 0, removed: 0, edited: 0, formatted: 0, unmarked: 0 };
   const byOld = new Map(), aIdx = new Map(a.map((e, i) => [e, i]));
   ops.forEach((o) => { if (o.o !== undefined) byOld.set(o.o, o); });
   const delContent = (src) => { const w = mark('del', time); w.textContent = norm(src.textContent); src.querySelectorAll('img').forEach((i) => w.append(i.cloneNode(true))); return w; };
@@ -226,11 +283,11 @@ export function diffHtml(oldHtml, newHtml) {
     return true;
   };
   ops.forEach((op, k) => {
-    if (op.t === 'eq') return;
+    if (op.t === 'eq') { if (markText(b[op.n], a[op.o], time).fmt) st.formatted++; return; }
     if (op.t === 'mod') {
       const el = b[op.n], src = a[op.o];
-      const marks = markText(el, norm(plain(src)), time) + markImages(src, el);
-      if (marks) st.edited++; else st.unmarked++;
+      const m = markText(el, src, time), pics = markImages(src, el);
+      if (m.text || pics) st.edited++; else if (m.fmt) st.formatted++; else st.unmarked++;
     } else if (op.t === 'ins') {
       const w = mark('ins', time);
       w.append(...b[op.n].childNodes);
@@ -250,7 +307,7 @@ export function diffHtml(oldHtml, newHtml) {
       st.removed++;
     }
   });
-  return { html: B.innerHTML, stats: st, changes: st.added + st.removed + st.edited };
+  return { html: B.innerHTML, stats: st, changes: st.added + st.removed + st.edited + st.formatted };
 }
 
 const when = (ts) => new Date(ts).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
@@ -292,7 +349,7 @@ async function compare() {
   const d = api.doc;
   await api.createDoc(`Comparison: ${d.title || 'Untitled'}`, res.html, { page: d.page, theme: d.theme, hf: d.hf, styles: d.styles, themeCustom: d.themeCustom, x: d.x });
   const s = res.stats;
-  api.toast(`Compared with ${label}: ${s.added} added, ${s.removed} removed, ${s.edited} edited${s.unmarked ? `; ${s.unmarked} changes in tables, pictures or notes are not marked` : ''}.`);
+  api.toast(`Compared with ${label}: ${s.added} added, ${s.removed} removed, ${s.edited} edited${s.formatted ? `, ${s.formatted} reformatted` : ''}${s.unmarked ? `; ${s.unmarked} changes in tables, pictures or notes are not marked` : ''}.`);
 }
 
 export function init(a) {
