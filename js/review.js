@@ -258,9 +258,24 @@ function guardFormat(cmd, val, el) {
   api.changed(true);
   return true;
 }
+// Moves el out of the formatting around it (bold, italic, a link, a styled span) by splitting each into the part
+// before and the part after, so the restored old look is not mixed with the new one. Only for marks whose
+// data-was holds the whole old look (Compare's), not just the selected words.
+const LIFT = 'b,strong,i,em,u,s,strike,sub,sup,mark,a[href],span[style]';
+function liftOut(el) {
+  for (let a = el.parentElement; a && a.matches(LIFT) && !a.matches('.fc,.cm,.tc,.shape,.eq,.wordart,.textbox'); a = el.parentElement) {
+    const after = a.cloneNode(false);
+    after.removeAttribute('id');
+    while (el.nextSibling) after.append(el.nextSibling);
+    a.after(el);
+    if (after.firstChild) el.after(after);
+    if (!a.firstChild) a.remove();
+  }
+}
 function resolveFormat(el, accept) {
   if (!el || !el.isConnected) return;
   if (accept) { unwrap(el); return; }
+  if (el.dataset.lift) liftOut(el);
   const t = document.createElement('template');
   t.innerHTML = el.dataset.was || '';
   el.replaceWith(t.content);

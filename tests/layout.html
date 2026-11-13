@@ -381,6 +381,42 @@ const tests = [
     }
     return { fail: f, info: `accepted ${acc.charts.length} charts, rejected ${rej.charts.length} charts` };
   } },
+  { name: 'Rejecting a partial formatting change restores the old look of every word, not only the changed ones', async run() {
+    const { diffHtml } = await import('../js/compare.js?t=' + Date.now());
+    const cases = [
+      ['<p><b>one</b> two three four</p>', '<p><b>one two three</b> four</p>'],
+      ['<p>one <i>two three</i> four five</p>', '<p>one <i>two</i> three four five</p>'],
+      ['<p><b>one two three four</b></p>', '<p><b>one</b> two <b>three four</b></p>'],
+      ['<p><a href="https://x.example/">See</a> the guide now</p>', '<p><a href="https://x.example/">See the guide</a> now</p>'],
+      ['<p>Make <u><b>this</b> word</u> count</p>', '<p>Make <u><b>this word</b></u> count</p>'],
+    ];
+    // the look of every non-space character: which formatting wraps it
+    const looks = (html) => {
+      const b = document.createElement('div'); b.innerHTML = html;
+      const out = [], w = document.createTreeWalker(b, NodeFilter.SHOW_TEXT);
+      for (let n; (n = w.nextNode());) {
+        const k = [];
+        for (let e = n.parentElement; e && e !== b; e = e.parentElement) k.push(e.tagName + (e.getAttribute('href') || ''));
+        for (const c of n.data) if (/\S/.test(c)) out.push(c + ':' + k.sort().join('>'));
+      }
+      return out.join(' ');
+    };
+    const f = [];
+    for (const [old, cur] of cases) {
+      const r = diffHtml(old, cur);
+      if (!r.stats.formatted) { f.push('no formatting change marked for ' + cur); continue; }
+      await load(r.html);
+      D.querySelector('[data-cmd="rejectAll"]').click();
+      await sleep(200);
+      if (ed.querySelector('span.fc,ins.tc,del.tc')) f.push('marks left for ' + cur);
+      if (looks(ed.innerHTML) !== looks(old)) f.push('reject of ' + cur + ' gave ' + ed.innerHTML + ', expected the look of ' + old);
+      await load(r.html);
+      D.querySelector('[data-cmd="acceptAll"]').click();
+      await sleep(200);
+      if (looks(ed.innerHTML) !== looks(cur)) f.push('accept of ' + cur + ' gave ' + ed.innerHTML);
+    }
+    return { fail: f, info: cases.length + ' cases' };
+  } },
   { name: 'PDF export has one page per layout page, real text, links and bookmarks', async run() {
     await load(`<h1>Heading one</h1><p>Visit <a href="https://example.com/x">our site</a> and <b>read</b> this.</p><p>${lorem(1200)}</p><h2>Second</h2><p>${lorem(300)}</p>`, 1);
     const pdf = await W.eval(`import('${new URL('../js/pdf.js', location.href).href}')`), pages = (await W.eval(`import('${new URL('../js/pages.js', location.href).href}')`)).count();
