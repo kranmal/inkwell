@@ -2,6 +2,7 @@
 // placed where the browser drew it, in a standard PDF font (Helvetica, Times or Courier, stretched to the exact
 // width), with backgrounds, borders, list markers, pictures and links, and headings as bookmarks.
 import { geometry } from './pages.js';
+import { parseFont } from './pdffont.js';
 
 let api;
 const K = 0.75; // CSS px to PDF points
@@ -185,17 +186,17 @@ function markerOf(li, cs) {
 const fkey = (f) => f.fam * 4 + (f.bold ? 1 : 0) + (f.italic ? 2 : 0);
 
 // ---------- the exporter ----------
-export async function buildPdf() {
+export async function buildPdf(opts = {}) {
   lost = 0;
   const { editor, page } = api;
   await api.flush();
   await document.fonts.ready;
   window.dispatchEvent(new Event('beforeprint')); // clears zoom, find marks, selection
   await new Promise((r) => { requestAnimationFrame(() => requestAnimationFrame(r)); setTimeout(r, 300); });
-  try { return await collect(editor, page); } finally { window.dispatchEvent(new Event('afterprint')); }
+  try { return await collect(editor, page, opts.source); } finally { window.dispatchEvent(new Event('afterprint')); }
 }
 
-async function collect(editor, page) {
+async function collect(editor, page, source) {
   const { pgs, W } = geometry();
   if (!pgs.length) throw new Error('no pages');
   const pr = page.getBoundingClientRect();
@@ -215,6 +216,31 @@ async function collect(editor, page) {
   const bookmarks = [];
   const nodes = [];
   for (const root of roots) { nodes.push(root); for (const el of root.querySelectorAll('*')) nodes.push(el); }
+
+  // embedded fonts: find the real font file for every family/weight/style in use
+  const faceCache = new Map(), faces = [];
+  const faceKey = (cs) => `${cs.fontFamily}|${+cs.fontWeight >= 600 ? 1 : 0}${/italic|oblique/.test(cs.fontStyle) ? 1 : 0}`;
+  const faceFor = (cs) => faceCache.get(faceKey(cs)) || null;
+  if (source) {
+    for (const el of nodes) {
+      if (el.closest(SKIP) || !(el.tagName === 'LI' || [...el.childNodes].some((c) => c.nodeType === 3 && c.data.trim()))) continue;
+      const cs = sty(el), k = faceKey(cs);
+      if (faceCache.has(k)) continue;
+      faceCache.set(k, null);
+      const bold = +cs.fontWeight >= 600, italic = /italic|oblique/.test(cs.fontStyle);
+      for (const fam of cs.fontFamily.split(/,(?=(?:[^"']*["'][^"']*["'])*[^"']*$)/).map((x) => x.trim().replace(/^["']|["']$/g, ''))) {
+        if (!fam || /^(serif|sans-serif|monospace|cursive|fantasy|system-ui|ui-[a-z-]+|-apple-system)$/i.test(fam)) break;
+        let got = null;
+        try { got = await source(fam, bold, italic); } catch { got = null; }
+        if (!got) continue;
+        const font = parseFont(got.data);
+        if (!font) break;
+        const face = { font, used: new Map(), name: got.name || fam, italic, idx: faces.length };
+        faces.push(face); faceCache.set(k, face);
+        break;
+      }
+    }
+  }
 
   // 1. backgrounds, borders, pictures, leaders, markers
   for (const el of nodes) {
@@ -317,16 +343,41 @@ async function collect(editor, page) {
     }
     const fam = family(cs.fontFamily), bold = +cs.fontWeight >= 600, italic = /italic|oblique/.test(cs.fontStyle);
     const sw = stdWidth(m.text, fam, bold, italic) * fs;
-    word(p, m.text, contentLeft - fs * 0.3 - sw, base, sw, { fam, bold, italic, fs, col, deco: null });
+    word(p, m.text, contentLeft - fs * 0.3 - sw, base, sw, { fam, bold, italic, fs, col, deco: null, face: faceFor(cs) });
   }
 
+  function glyphs(face, str) { // -> {hex, natural} or null when the font lacks a character
+    const { font } = face;
+    let hex = '', nat = 0, trail = 0;
+    for (const ch of str) {
+      let cp = ch.codePointAt(0);
+      if (cp === 0x200B || cp === 0xAD || cp === 0x200C || cp === 0x200D || cp === 0xFEFF || cp === 0x0A) continue;
+      if (cp === 0x09 || cp === 0xA0 || (cp >= 0x2002 && cp <= 0x2009) || cp === 0x202F) cp = 0x20;
+      const g = font.gid(cp);
+      if (!g) return null;
+      face.used.set(g, cp);
+      hex += g.toString(16).padStart(4, '0');
+      const a = font.adv(g) / font.upm;
+      if (cp === 0x20) trail += a; else { nat += a + trail; trail = 0; }
+    }
+    return hex ? { hex, natural: nat } : null;
+  }
   function word(p, str, x, baseline, width, f) {
-    const hex = winAnsi(str);
-    if (!hex) return;
-    const std = stdWidth(str.trimEnd(), f.fam, f.bold, f.italic) * f.fs;
-    const tz = std > 0 ? Math.max(20, Math.min(400, (width / std) * 100)) : 100;
-    p.fonts.add(fkey(f));
-    p.L[3].push(`${rg(f.col)} rg BT /F${fkey(f)} ${num(f.fs * K)} Tf ${num(tz)} Tz ${X(p, x)} ${Y(p, baseline)} Td <${hex}> Tj ET`);
+    const g = f.face ? glyphs(f.face, str) : null;
+    let hex, font, tz;
+    if (g) {
+      const nat = g.natural * f.fs;
+      tz = nat > 0 ? Math.max(20, Math.min(400, (width / nat) * 100)) : 100;
+      font = `E${f.face.idx}`; hex = g.hex;
+    } else {
+      hex = winAnsi(str);
+      if (!hex) return;
+      const std = stdWidth(str.trimEnd(), f.fam, f.bold, f.italic) * f.fs;
+      tz = std > 0 ? Math.max(20, Math.min(400, (width / std) * 100)) : 100;
+      font = `F${fkey(f)}`;
+    }
+    p.fonts.add(g ? font : fkey(f));
+    p.L[3].push(`${rg(f.col)} rg BT /${font} ${num(f.fs * K)} Tf ${num(tz)} Tz ${X(p, x)} ${Y(p, baseline)} Td <${hex}> Tj ET`);
     if (f.deco) {
       const dc = f.deco.color || f.col, t = Math.max(0.5 / K, f.fs * 0.06);
       if (/underline/.test(f.deco.line)) rect(p, 3, x, baseline + f.fs * 0.12, width, t, dc);
@@ -347,7 +398,7 @@ async function collect(editor, page) {
       const s = sty(e), l = s.textDecorationLine;
       if (l && l !== 'none') { const dcol = rgba(s.textDecorationColor); deco = { line: l, color: dcol && !/currentcolor/i.test(s.textDecorationColor) ? onWhite(dcol) : onWhite(rgba(s.color) || [0, 0, 0, 1]) }; break; }
     }
-    f = { fam: family(cs.fontFamily), bold: +cs.fontWeight >= 600, italic: /italic|oblique/.test(cs.fontStyle), fs, col, deco, asc: ascentOf(cs) * fs, tt: cs.textTransform, vis: visible(el) && +cs.opacity > 0 };
+    f = { face: faceFor(cs), fam: family(cs.fontFamily), bold: +cs.fontWeight >= 600, italic: /italic|oblique/.test(cs.fontStyle), fs, col, deco, asc: ascentOf(cs) * fs, tt: cs.textTransform, vis: visible(el) && +cs.opacity > 0 };
     fcache.set(el, f);
     return f;
   };
@@ -400,14 +451,34 @@ async function collect(editor, page) {
       p.annots.push({ rect: [X(p, r.left), Y(p, r.bottom), X(p, r.right), Y(p, r.top)], uri: href });
     }
   }
-  return assemble(pages, images, bookmarks);
+  return assemble(pages, images, bookmarks, faces.filter((f) => f.used.size));
 }
 
-async function assemble(pages, images, bookmarks) {
+async function assemble(pages, images, bookmarks, faces) {
   const pdf = new Pdf();
   const catalog = pdf.reserve(), tree = pdf.reserve(), info = pdf.reserve();
   const fontIds = new Map();
   const fontId = (k) => { if (!fontIds.has(k)) fontIds.set(k, pdf.add(`<< /Type /Font /Subtype /Type1 /BaseFont /${BASE[Math.floor(k / 4)][k % 4]} /Encoding /WinAnsiEncoding >>`)); return fontIds.get(k); };
+  const efId = new Map();
+  const tag = (i) => String.fromCharCode(65 + (i % 26), 65 + (Math.floor(i / 26) % 26), 65 + ((i * 7) % 26), 65 + ((i * 11) % 26), 65 + ((i * 5) % 26), 65 + ((i * 3) % 26));
+  for (const f of faces) {
+    const { font } = f, sc = 1000 / font.upm;
+    const data = font.subset(f.used.keys());
+    const file = await pdf.addStream(`/Length1 ${data.length}`, data);
+    const base = `${tag(f.idx + 1)}+${String(f.name).replace(/[^A-Za-z0-9-]/g, '') || 'Font'}`;
+    const desc = pdf.add(`<< /Type /FontDescriptor /FontName /${base} /Flags 32 /FontBBox [${font.bbox.map((v) => Math.round(v * sc)).join(' ')}] /ItalicAngle ${f.italic ? -12 : 0} /Ascent ${Math.round(font.ascent * sc)} /Descent ${Math.round(font.descent * sc)} /CapHeight ${Math.round(font.ascent * sc * 0.7)} /StemV 80 /FontFile2 ${file} 0 R >>`);
+    const gs = [...f.used.keys()].sort((a, b) => a - b);
+    const cid = pdf.add(`<< /Type /Font /Subtype /CIDFontType2 /BaseFont /${base} /CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> /FontDescriptor ${desc} 0 R /CIDToGIDMap /Identity /DW 0 /W [${gs.map((g) => `${g} [${Math.round(font.adv(g) * sc)}]`).join(' ')}] >>`);
+    const hx = (cp) => (cp > 0xFFFF ? (((cp - 0x10000) >> 10) + 0xD800).toString(16).padStart(4, '0') + (((cp - 0x10000) & 0x3FF) + 0xDC00).toString(16).padStart(4, '0') : cp.toString(16).padStart(4, '0'));
+    let cm = '/CIDInit /ProcSet findresource begin 12 dict begin begincmap /CMapName /Adobe-Identity-UCS def /CMapType 2 def 1 begincodespacerange <0000> <FFFF> endcodespacerange\n';
+    for (let i = 0; i < gs.length; i += 100) {
+      const part = gs.slice(i, i + 100);
+      cm += `${part.length} beginbfchar\n${part.map((g) => `<${g.toString(16).padStart(4, '0')}> <${hx(f.used.get(g))}>`).join('\n')}\nendbfchar\n`;
+    }
+    cm += 'endcmap CMapName currentdict /CMap defineresource pop end end';
+    const tu = await pdf.addStream('', enc.encode(cm));
+    efId.set(`E${f.idx}`, pdf.add(`<< /Type /Font /Subtype /Type0 /BaseFont /${base} /Encoding /Identity-H /DescendantFonts [${cid} 0 R] /ToUnicode ${tu} 0 R >>`));
+  }
   const imgIds = [];
   for (const [i, im] of images.entries()) {
     if (im.jpeg) imgIds[i] = await pdf.addStream(`/Type /XObject /Subtype /Image /Width ${im.w} /Height ${im.h} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode`, im.jpeg, false);
@@ -420,7 +491,7 @@ async function assemble(pages, images, bookmarks) {
   for (const [i, p] of pages.entries()) {
     const content = await pdf.addStream('', enc.encode(p.L.map((l) => l.join('\n')).filter(Boolean).join('\n')));
     const annots = p.annots.map((a) => pdf.add(`<< /Type /Annot /Subtype /Link /Rect [${a.rect.join(' ')}] /Border [0 0 0] /A << /S /URI /URI (${encodeURI(a.uri).replace(/[()\\]/g, '\\$&')}) >> >>`));
-    const fonts = [...p.fonts].map((k) => `/F${k} ${fontId(k)} 0 R`).join(' ');
+    const fonts = [...p.fonts].map((k) => (typeof k === 'string' ? `/${k} ${efId.get(k)} 0 R` : `/F${k} ${fontId(k)} 0 R`)).join(' ');
     const xo = [...p.imgs].map((k) => `/Im${k} ${imgIds[k]} 0 R`).join(' ');
     pdf.set(pageIds[i], `<< /Type /Page /Parent ${tree} 0 R /MediaBox [0 0 ${num(p.g.w * K)} ${num(p.g.h * K)}] /Resources << /Font << ${fonts} >>${xo ? ` /XObject << ${xo} >>` : ''} >> /Contents ${content} 0 R${annots.length ? ` /Annots [${annots.map((a) => a + ' 0 R').join(' ')}]` : ''} >>`);
   }
@@ -449,11 +520,30 @@ async function assemble(pages, images, bookmarks) {
   return { blob: pdf.build(catalog, info), pages: pages.length, lost };
 }
 
-async function savePdf() {
+// The fonts installed on this computer, read with the browser's Local Font Access API (Chrome and Edge, with permission).
+async function localFonts() {
+  const list = await window.queryLocalFonts();
+  const by = new Map();
+  for (const f of list) { const k = f.family.toLowerCase(); if (!by.has(k)) by.set(k, []); by.get(k).push(f); }
+  const STY = [/^(regular|book|roman|normal|medium)$/, /^bold$/, /^(italic|oblique|book italic|regular italic)$/, /^(bold italic|bold oblique)$/];
+  return async (fam, bold, italic) => {
+    const want = STY[(bold ? 1 : 0) + (italic ? 2 : 0)];
+    const f = (by.get(fam.toLowerCase()) || []).find((x) => want.test(x.style.toLowerCase()));
+    return f ? { data: await (await f.blob()).arrayBuffer(), name: f.postscriptName } : null;
+  };
+}
+
+async function savePdf(embed) {
   api.toggleBackstage(false);
+  let source = null;
+  if (embed === true) {
+    if (!window.queryLocalFonts) { api.toast('Embedding your fonts needs Chrome or Edge. Saving with standard PDF fonts.'); } else {
+      try { source = await localFonts(); } catch { api.toast('Font access was not allowed. Saving with standard PDF fonts.'); }
+    }
+  }
   api.toast('Building PDF…');
   try {
-    const r = await buildPdf();
+    const r = await buildPdf({ source });
     api.download(r.blob, api.fileBase() + '.pdf');
     api.toast(`Saved a ${r.pages}-page PDF${r.lost ? `; ${r.lost} characters the PDF fonts lack were replaced with “?”` : ''}.`);
   } catch (e) {
@@ -464,5 +554,8 @@ async function savePdf() {
 
 export function init(a) {
   api = a;
-  api.cmd('savePdf', savePdf);
+  const b = document.getElementById('bs-pdf-fonts');
+  if (b && !window.queryLocalFonts) b.hidden = true;
+  api.cmd('savePdf', () => savePdf(false));
+  api.cmd('savePdfFonts', () => savePdf(true));
 }
