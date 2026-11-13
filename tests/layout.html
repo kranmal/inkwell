@@ -669,7 +669,11 @@ const tests = [
     if (!/<w:pPr><w:rPr><w:del /.test(xml)) f.push('the removed paragraph mark is not tracked');
     if (!/<w:pPr><w:rPr><w:ins /.test(xml)) f.push('the added paragraph mark is not tracked');
     if (count(/<w:rPrChange /g) !== 1) f.push('expected 1 formatting change, found ' + count(/<w:rPrChange /g) + ' (table shading must not become a run change)');
-    const ids = [...xml.matchAll(/<w:(?:ins|del|rPrChange) w:id="(\d+)"/g)].map((m) => m[1]);
+    const tc = xml.match(/<w:tcPrChange [^>]*><w:tcPr>(?:(?!<\/w:tcPr>)[\s\S])*<\/w:tcPr><\/w:tcPrChange>/g) || [];
+    if (tc.length !== 1) f.push('expected 1 tracked cell-property change, found ' + tc.length);
+    else if (!/w:fill="FFFF00"/i.test(tc[0]) || !/w:fill="00FFFF"/i.test(xml.match(/<w:tcPr>(?:(?!<\/w:tcPr>)[\s\S])*00FFFF[\s\S]*?<w:tcPrChange/)?.[0] || '')) f.push('cell shading change should hold the old yellow and the new cyan: ' + tc[0]);
+    if (/<w:tcPrChange[\s\S]*?<\/w:tcPrChange><\/w:tcPr>/.test(xml) === false && tc.length) f.push('tcPrChange must be the last element of tcPr');
+    const ids = [...xml.matchAll(/<w:(?:ins|del|rPrChange|tcPrChange) w:id="(\d+)"/g)].map((m) => m[1]);
     if (new Set(ids).size !== ids.length) f.push('tracked change ids repeat');
     const rich = await prepare(JSZip, await blob.arrayBuffer());
     const box = document.createElement('div');

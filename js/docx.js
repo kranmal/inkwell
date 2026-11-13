@@ -400,6 +400,14 @@ export async function exportDocx(root, { title = 'Document', page, hf = null, st
         if (p.cs > 1) pr += `<w:gridSpan w:val="${p.cs}"/>`;
         if (p.rs > 1) pr += p.r === r ? '<w:vMerge w:val="restart"/>' : '<w:vMerge/>';
         if (fill) pr += `<w:shd w:val="clear" w:color="auto" w:fill="${fill}"/>`;
+        // A Compare mark on the cell records its old style: the shading it had is written as a tracked cell-property change.
+        const look = p.r === r ? [...cell.children].find((e) => e.matches('span.fc') && 'cellStyle' in e.dataset) : null;
+        if (look) {
+          const tmp = document.createElement('i');
+          tmp.setAttribute('style', look.dataset.cellStyle);
+          const was = hex(tmp.style.backgroundColor) || (head ? 'F2F2F0' : cl.contains('tb-striped') && tr.rowIndex % 2 === 1 ? 'F3F5F4' : null);
+          if (was !== fill) pr += `<w:tcPrChange w:id="${++annId}" w:author="${who(look)}" w:date="${iso(look.dataset.time)}"><w:tcPr><w:tcW w:w="${width}" w:type="dxa"/>${p.cs > 1 ? `<w:gridSpan w:val="${p.cs}"/>` : ''}${was ? `<w:shd w:val="clear" w:color="auto" w:fill="${was}"/>` : ''}</w:tcPr></w:tcPrChange>`;
+        }
         let inner = '<w:p/>';
         if (p.r === r) {
           inner = hasBlockChild(cell) ? blocks(cell, { cell: true }) : para(cell, {}, kids(cell, head ? { b: true } : {}));
