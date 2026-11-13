@@ -264,6 +264,7 @@
     <div class="grp">
       <button class="rb wide drop" data-menu="m-shade" data-icon="palette">Shading</button>
       <button class="rb wide drop" data-menu="m-borders" data-icon="borders">Borders</button>
+      <button class="rb wide drop" data-menu="m-cellborders" data-icon="borders" title="Draw or remove a border on one side of the selected cells">Cell borders</button>
     </div>
     <div class="grp">
       <button class="rb wide" data-cmd="delRow" data-icon="trash">Delete row</button>
@@ -399,6 +400,15 @@
   <button data-cmd="borders" data-val="horizontal">Horizontal lines</button>
   <button data-cmd="borders" data-val="striped">Striped rows</button>
   <button data-cmd="borders" data-val="none">No borders</button>
+</div>
+
+<div class="menu" id="m-cellborders" hidden>
+  <button data-cmd="cellBorder" data-val="top">Top border</button>
+  <button data-cmd="cellBorder" data-val="bottom">Bottom border</button>
+  <button data-cmd="cellBorder" data-val="left">Left border</button>
+  <button data-cmd="cellBorder" data-val="right">Right border</button>
+  <button data-cmd="cellBorder" data-val="all">All sides</button>
+  <button data-cmd="cellBorder" data-val="clear">Clear cell borders</button>
 </div>
 
 <div class="menu" id="m-case" hidden>

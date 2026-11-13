@@ -233,6 +233,25 @@ function shade(val) {
   api.closeMenus();
   api.done();
 }
+// A border on one side of the selected cells (it overrides the table's own borders there); drawing a side every selected cell already has removes it.
+function cellBorder(val) {
+  api.restore();
+  const s = selCells();
+  if (!s) { api.toast('Click inside a table first.'); return; }
+  api.commit();
+  const sides = val === 'all' ? ['top', 'right', 'bottom', 'left'] : [val];
+  for (const c of s.cells) {
+    if (val === 'clear') { for (const d of ['top', 'right', 'bottom', 'left']) c.style.removeProperty('border-' + d); }
+  }
+  if (val !== 'clear') {
+    const has = (c, d) => c.style.getPropertyValue('border-' + d + '-style') === 'solid';
+    const off = sides.every((d) => s.cells.every((c) => has(c, d)));
+    for (const c of s.cells) for (const d of sides) { if (off) c.style.removeProperty('border-' + d); else c.style.setProperty('border-' + d, '1.5px solid #222'); }
+  }
+  for (const c of s.cells) if (!c.getAttribute('style')) c.removeAttribute('style');
+  api.closeMenus();
+  api.done();
+}
 function borders(val) {
   op((c) => {
     c.table.classList.remove('tb-none', 'tb-outer', 'tb-horizontal', 'tb-striped');
@@ -317,6 +336,7 @@ export function init(a) {
   api.cmd('splitCell', split);
   api.cmd('shade', shade);
   api.cmd('borders', borders);
+  api.cmd('cellBorder', cellBorder);
 
   const sw = api.$('#m-shade .swatches');
   if (sw) sw.innerHTML = TINTS.map((c) => `<button data-cmd="shade" data-val="${c}" style="background:${c}" title="${c}" aria-label="Shade ${c}"></button>`).join('');

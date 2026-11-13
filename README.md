@@ -7,7 +7,7 @@ A word processor that runs entirely in the browser. Live at https://kranmal.gith
 - Lists, indents, alignment, line and paragraph spacing, columns, margins, paper size
 - Real pages on screen, with headers, footers and page numbers (optionally different on the first page)
 - Footnotes, endnotes and a table of contents that follows your headings and page numbers
-- Tables with merged and split cells, shading, border styles and drag-to-resize columns
+- Tables with merged and split cells, shading, border styles, a border on any one side of the selected cells (Cell borders) and drag-to-resize columns
 - Shapes, text boxes and charts (column, bar, line, pie) built from data you type in
 - Comments and track changes, with accept and reject, Next and Previous buttons that step through the changes (with a "3 of 17" count), also on Ctrl+Alt+] and Ctrl+Alt+[ (⌥⌘] and ⌥⌘[ on a Mac), and **Compare** to see what changed since a saved version or another file (text, formatting, text boxes, WordArt, footnotes, endnotes, comments and table shading, alignment, borders (including a single side of a cell), merged and split cells, and column widths; header, footer and page-number changes are listed in a note at the top, each line with its own Accept and Reject)
 - Pictures, links, page breaks, symbols
