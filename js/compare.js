@@ -23,8 +23,10 @@ function parse(html) {
 const hash = (str) => { let h = 5381; for (let i = 0; i < str.length; i++) h = ((h << 5) + h + str.charCodeAt(i)) | 0; return (h >>> 0).toString(36); };
 const imgSig = (img) => 'img' + hash(img.getAttribute('src') || '');
 // A paragraph's identity: its text plus its pictures, so a replaced or added picture counts as a change.
-const sig = (el) => [norm(el.textContent), ...[...el.querySelectorAll('img')].map(imgSig)].join(' ').trim();
-const leaves = (root) => [...root.querySelectorAll(LEAF)].filter((el) => !el.closest(SKIP) && !el.querySelector(LEAF) && (norm(el.textContent) || el.querySelector('img')));
+// Equations are left out of a paragraph's text: they are compared as objects, so an equation-only change is not a text edit.
+const plain = (el) => { if (!el.querySelector('.eq')) return norm(el.textContent); const c = el.cloneNode(true); c.querySelectorAll('.eq').forEach((q) => q.remove()); return norm(c.textContent); };
+const sig = (el) => [plain(el), ...[...el.querySelectorAll('img')].map(imgSig)].join(' ').trim();
+const leaves = (root) => [...root.querySelectorAll(LEAF)].filter((el) => !el.closest(SKIP) && !el.querySelector(LEAF) && (norm(el.textContent) || el.querySelector('img,.eq')));
 
 // Best in-order pairing of two sequences. score(i, j) > 0 means a and b may be paired.
 // Returns [[i, j], ...] ascending, or null when the input is too large to align.
@@ -225,11 +227,11 @@ function markText(el, src, time) {
 // ---------- charts, shapes and SmartArt ----------
 // Each is compared as a whole: same data and look means unchanged. A changed one is shown as the old object
 // struck out beside the new one marked as inserted; added and removed ones are marked where they are (or were).
-const OBJS = '.chart,.shape,.smartart';
-const kindOf = (el) => (el.classList.contains('chart') ? 'chart' : el.classList.contains('smartart') ? 'smartart' : 'shape');
-const objSig = (el) => { const k = kindOf(el); return k + hash(k === 'chart' ? (el.dataset.chart || '') + el.style.width : k === 'smartart' ? el.dataset.sa || '' : el.className + '|' + (el.getAttribute('style') || '') + '|' + norm(el.textContent)); };
-const objectsOf = (root) => [...root.querySelectorAll(OBJS)].filter((e) => !e.parentElement.closest(OBJS));
-function markObjects(A, B, time, st) {
+const OBJS = '.chart,.shape,.smartart,.eq';
+const kindOf = (el) => (el.classList.contains('chart') ? 'chart' : el.classList.contains('smartart') ? 'smartart' : el.classList.contains('eq') ? 'eq' : 'shape');
+const objSig = (el) => { const k = kindOf(el); return k + hash(k === 'chart' ? (el.dataset.chart || '') + el.style.width : k === 'smartart' ? el.dataset.sa || '' : k === 'eq' ? el.dataset.eq || norm(el.textContent) : el.className + '|' + (el.getAttribute('style') || '') + '|' + norm(el.textContent)); };
+const objectsOf = (root) => [...root.querySelectorAll(OBJS)].filter((e) => !e.parentElement.closest(OBJS + ',ins.tc,del.tc'));
+function markObjects(A, B, time, st, home) {
   const a = objectsOf(A), b = objectsOf(B), n = a.length, m = b.length;
   if (!n && !m) return;
   const sa = a.map(objSig), sb = b.map(objSig);
@@ -251,8 +253,10 @@ function markObjects(A, B, time, st) {
       const w = wrap(el);
       if (at >= 0) { w.before(ghost(free.splice(at, 1)[0])); st.edited++; } else st.added++;
     }
-    for (const o of free) gone.push(ghost(o));
-    for (const w of gone) {
+    for (const o of free) gone.push([o, ghost(o)]);
+    for (const [o, w] of gone) {
+      const h = home && home(o);       // a removed equation goes back into its own paragraph
+      if (h) { h.append(' ', w); st.removed++; continue; }
       if (g.anchor) g.anchor.before(w);
       else if (m) { const last = b[m - 1]; (last.parentElement.matches('ins.tc') ? last.parentElement : last).after(w); } else { const notes = B.querySelector(':scope > ol.footnotes,:scope > ol.endnotes'); if (notes) notes.before(w); else B.append(w); }
       st.removed++;
@@ -346,7 +350,11 @@ export function diffHtml(oldHtml, newHtml) {
       st.removed++;
     }
   });
-  markObjects(A, B, time, st);
+  markObjects(A, B, time, st, (o) => {
+    if (!o.matches('.eq')) return null;
+    const i = aIdx.get(o.closest(LEAF)), op = i === undefined ? null : byOld.get(i);
+    return op && op.n !== undefined ? b[op.n] : null;
+  });
   return { html: B.innerHTML, stats: st, changes: st.added + st.removed + st.edited + st.formatted };
 }
 
