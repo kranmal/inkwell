@@ -24,6 +24,7 @@ import * as citeMod from './cite.js';
 import * as extrasMod from './extras.js';
 import * as tablexMod from './tablex.js';
 import * as docsMod from './docs.js';
+import * as compareMod from './compare.js';
 import * as toolsMod from './tools.js';
 
 const $ = (s, r = document) => r.querySelector(s);
@@ -950,10 +951,10 @@ async function createDoc(title, html, extra = {}) {
   if (html) await save();
   caretIn(editor.firstElementChild);
 }
-async function openFile(file) {
-  if (!file) return;
+// Reads a .docx, .html, .txt or .md file into { name, html, extra } without opening it.
+async function fileToHtml(file) {
   const name = file.name.replace(/\.[^.]+$/, ''), ext = (file.name.split('.').pop() || '').toLowerCase();
-  try {
+  {
     if (ext === 'docx') {
       const mammoth = await loadScript('vendor/mammoth.browser.min.js', 'mammoth');
       const JSZip = await loadScript('vendor/jszip.min.js', 'JSZip');
@@ -961,7 +962,7 @@ async function openFile(file) {
       const res = await mammoth.convertToHtml({ arrayBuffer: rich.buffer }, {
         styleMap: ["p[style-name='Title'] => p.doc-title:fresh", "p[style-name='Subtitle'] => p.doc-subtitle:fresh", "p[style-name='Quote'] => p.quote:fresh", "p[style-name='No Spacing'] => p.no-spacing:fresh"],
       });
-      await createDoc(name, clean(rich.finish(res.value), { full: true }), rich.extra);
+      return { name, html: clean(rich.finish(res.value), { full: true }), extra: rich.extra };
     } else if (ext === 'html' || ext === 'htm') {
       const text = await file.text();
       const d = new DOMParser().parseFromString(text, 'text/html');
@@ -972,10 +973,17 @@ async function openFile(file) {
         if (root.dataset.theme) extra.theme = root.dataset.theme;
         for (const k of ['hf', 'styles', 'themeCustom', 'x']) { try { if (root.dataset[k]) extra[k] = JSON.parse(root.dataset[k]); } catch { /* ignore bad data */ } }
       }
-      await createDoc(d.title || name, clean(root.innerHTML, { full: true, collapse: !own }), extra);
+      return { name: d.title || name, html: clean(root.innerHTML, { full: true, collapse: !own }), extra };
     } else {
-      await createDoc(name, textToHtml(await file.text(), ext === 'md'));
+      return { name, html: textToHtml(await file.text(), ext === 'md'), extra: {} };
     }
+  }
+}
+async function openFile(file) {
+  if (!file) return;
+  try {
+    const f = await fileToHtml(file);
+    await createDoc(f.name, f.html, f.extra);
     toast(`Opened ${file.name}`);
   } catch (err) {
     console.error(err);
@@ -1440,14 +1448,14 @@ const api = {
   editor, page, canvas, $, $$, esc, ic, MM, COLORS, FONTS, STYLES, prefs, ext,
   begin, done, commit, changed, restore, insertBlock, caretIn, curBlock, selEl, selBlocks, keepSel, toast, pageDims, zoomF,
   closeMenus, placeMenu, showSide, savePrefs, topOf, emptyP, selectImg, placeImgBox, applyPage, applyTheme, refreshUI, inEditor, run,
-  createDoc, setDoc, download, clean, store, fileBase, save, flush, undo, exec, tableCtx, buildHtml, textToHtml, toggleBackstage, ask, newDoc,
+  createDoc, setDoc, download, clean, store, fileBase, save, flush, undo, exec, tableCtx, buildHtml, textToHtml, toggleBackstage, ask, newDoc, fileToHtml,
   get doc() { return doc; }, get selImg() { return selImg; }, get saved() { return saved; },
   cmd(name, fn) { ext.cmds[name] = fn; },
   on(evt, fn) { ext[evt].push(fn); },
 };
 
 async function start() {
-  for (const m of [pagesMod, tablesMod, refsMod, reviewMod, objectsMod, stylesMod, citeMod, extrasMod, tablexMod, docsMod, toolsMod]) m.init(api);
+  for (const m of [pagesMod, tablesMod, refsMod, reviewMod, objectsMod, stylesMod, citeMod, extrasMod, tablexMod, docsMod, compareMod, toolsMod]) m.init(api);
   buildUI();
   applyDark(); applyLang();
   document.execCommand('defaultParagraphSeparator', false, 'p');
