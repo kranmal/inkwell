@@ -3,7 +3,7 @@
 let api, sheets, decoLayer, hfLayer, rules, noteRules;
 let n = 1, P = 0, H = 0, paged = true, hfSig = '', secs = [], pgs = [], pageWmm = 210;
 const GAP = 24;
-const HF0 = { header: '', headerAlign: 'left', footer: '', footerAlign: 'left', num: 'none', numFormat: '1', firstDiff: false };
+const HF0 = { header: '', headerAlign: 'left', footer: '', footerAlign: 'left', num: 'none', numFormat: '1', firstDiff: false, firstHeader: '', firstFooter: '' };
 const ALIGNS = ['left', 'center', 'right'];
 
 export const resetHf = () => { hfSig = ''; };
@@ -113,7 +113,9 @@ export function sectionCss() {
 }
 export function firstPageCss() {
   if (!api || !api.doc || !hf().firstDiff) return '';
-  return ` @page :first { ${['top', 'bottom'].flatMap((zn) => ALIGNS.map((a) => `@${zn}-${a} { content: none; }`)).join(' ')} }`;
+  const h = hf(), z = slotParts({ ...h, header: h.firstHeader || '', footer: h.firstFooter || '', num: 'none' });
+  const fam = getComputedStyle(api.editor).fontFamily;
+  return ` @page :first { ${['top', 'bottom'].flatMap((zn) => ALIGNS.map((a) => z[zn][a].length ? `@${zn}-${a} { content: ${z[zn][a].map(q).join(' ')}; font: 9pt ${fam}; color: #6b6b6b; }` : `@${zn}-${a} { content: none; }`)).join(' ')} }`;
 }
 
 const SPLIT_TAGS = new Set(['P', 'LI', 'BLOCKQUOTE']);
@@ -644,8 +646,9 @@ function drawHf(d, whole) {
     const g = !whole && pgs[i];
     const place = g ? `left:${(Wpx() - g.w) / 2}px;right:auto;width:${g.w}px;` : '';
     const pm = g && g.m ? g.m : d.m;
-    const blank = h.firstDiff && i === 0;
+    const blank = false;
     const hp = hfFor(i);
+    if (h.firstDiff && i === 0) hp.eff = { ...hp.eff, header: h.firstHeader || '', footer: h.firstFooter || '', num: 'none' };
     const parts = slotParts(hp.eff)[which];
     const numText = (f, k, t) => numText0(f, k - hp.off, t);
     const any = !blank && ALIGNS.some((a) => parts[a].length);
@@ -689,6 +692,8 @@ function openDialog() {
   api.$('#hf-num').value = h.num;
   api.$('#hf-format').value = h.numFormat;
   api.$('#hf-first').checked = !!h.firstDiff;
+  api.$('#hf-first-header').value = h.firstHeader || '';
+  api.$('#hf-first-footer').value = h.firstFooter || '';
   dlg.returnValue = '';
   dlg.showModal();
 }
@@ -746,6 +751,7 @@ export function init(a) {
       header: api.$('#hf-header').value.trim(), headerAlign: api.$('#hf-header-align').value,
       footer: api.$('#hf-footer').value.trim(), footerAlign: api.$('#hf-footer-align').value,
       num: api.$('#hf-num').value, numFormat: api.$('#hf-format').value, firstDiff: api.$('#hf-first').checked,
+      firstHeader: api.$('#hf-first-header').value.trim(), firstFooter: api.$('#hf-first-footer').value.trim(),
     };
     hfSig = '';
     api.applyPage();

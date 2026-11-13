@@ -523,7 +523,7 @@ export function diffHtml(oldHtml, newHtml) {
 // ---------- headers, footers and page numbers ----------
 // These are page settings, not text, so they cannot be tracked changes. The differences are listed in a note at the top of the result
 // (the result itself carries the new settings); delete the note when you have read it.
-const HF_LABELS = { header: 'Header', headerAlign: 'Header alignment', footer: 'Footer', footerAlign: 'Footer alignment', num: 'Page numbers', numFormat: 'Page number style', firstDiff: 'Different first page' };
+const HF_LABELS = { header: 'Header', headerAlign: 'Header alignment', footer: 'Footer', footerAlign: 'Footer alignment', num: 'Page numbers', numFormat: 'Page number style', firstDiff: 'Different first page', firstHeader: 'First-page header', firstFooter: 'First-page footer' };
 const sectsOf = (html) => { const d = document.createElement('div'); d.innerHTML = html; return [...d.querySelectorAll('.sect-break')].map((el) => { try { return JSON.parse(el.dataset.sect || '{}') || {}; } catch { return {}; } }); };
 export function diffPage(oldHf, newHf, oldHtml, newHtml) {
   const shown = (k, v) => (v === undefined || v === null || v === '' || v === false ? 'none' : v === true ? 'yes' : String(v));

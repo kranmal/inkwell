@@ -537,7 +537,11 @@
       <label class="field grow"><span>Page numbers</span><select id="hf-num"><option value="none">None</option><option value="top-right">Top right</option><option value="bottom-left">Bottom left</option><option value="bottom-center">Bottom centre</option><option value="bottom-right">Bottom right</option></select></label>
       <label class="field grow"><span>Number format</span><select id="hf-format"><option value="1">1, 2, 3</option><option value="page">Page 1</option><option value="of">Page 1 of 3</option></select></label>
     </div>
-    <label class="check"><input type="checkbox" id="hf-first">Leave the first page blank</label>
+    <label class="check"><input type="checkbox" id="hf-first">First page is different (blank unless you add text below)</label>
+    <div class="field-row">
+      <label class="field grow"><span>First-page header text</span><input id="hf-first-header" type="text" autocomplete="off" maxlength="120"></label>
+      <label class="field grow"><span>First-page footer text</span><input id="hf-first-footer" type="text" autocomplete="off" maxlength="120"></label>
+    </div>
     <div class="dlg-actions"><span class="spacer"></span><button class="btn" value="cancel">Cancel</button><button class="btn primary" value="ok">Apply</button></div>
   </form>
 </dialog>
