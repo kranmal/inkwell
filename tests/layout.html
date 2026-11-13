@@ -1044,6 +1044,7 @@ const tests = [
     dlg.returnValue = 'ok'; dlg.dispatchEvent(new Event('close'));
     await sleep(200);
     return { fail: f, info: JSON.stringify(a) };
+  } },
   { name: 'A text box keeps its fill and outline through a Word round trip', async run() {
     const { exportDocx, loadScript } = await import('../js/docx.js?t=' + Date.now());
     const { prepare } = await import('../js/docximport.js?t=' + Date.now());
