@@ -860,7 +860,7 @@ const KEEP_CLASS = new Set(['doc-title', 'doc-subtitle', 'no-spacing', 'quote', 
   'caption', 'cap-num', 'xref', 'idx', 'index', 'cite', 'biblio', 'eq', 'wordart', 'wa-solid', 'wa-outline', 'wa-shadow', 'wa-gradient', 'wa-emboss', 'smartart',
   'tf', 'mfield', 'sect-break', 'rep-head']);
 const KEEP_ATTR = new Set(['alt', 'colspan', 'rowspan', 'data-fn', 'data-cm', 'data-author', 'data-time', 'data-text', 'data-resolved', 'data-ch', 'data-chart', 'data-i',
-  'data-id', 'data-ref', 'data-k', 'data-cap', 'data-term', 'data-src', 'data-eq', 'data-sa', 'data-f', 'data-dp', 'data-field', 'data-sect']);
+  'data-id', 'data-ref', 'data-k', 'data-cap', 'data-term', 'data-src', 'data-eq', 'data-sa', 'data-f', 'data-dp', 'data-field', 'data-sect', 'data-kind']);
 const LOCKED = '.page-break,.fn-ref,.en-ref,.toc,.shape,.chart,.cap-num,.xref,.index,.cite,.biblio,.eq,.wordart,.smartart,.tf,.mfield,.sect-break';
 const STYLE_FULL = ['font-weight', 'font-style', 'text-decoration-line', 'color', 'background-color', 'font-size', 'font-family', 'text-align', 'line-height', 'margin-left', 'margin-right', 'margin-top', 'margin-bottom', 'vertical-align', 'width', 'height', 'float'];
 const STYLE_PASTE = ['font-weight', 'font-style', 'text-decoration-line', 'color', 'background-color', 'text-align', 'vertical-align'];
