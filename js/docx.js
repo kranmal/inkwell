@@ -412,23 +412,26 @@ export async function exportDocx(root, { title = 'Document', page, hf = null, st
         const dflt = head ? 'F2F2F0' : cl.contains('tb-striped') && tr.rowIndex % 2 === 1 ? 'F3F5F4' : null;
         const fill = hex(cell.style.backgroundColor) || dflt;
         // Cell properties in schema order: width, merge, borders, shading.
-        const props = (cs, rs, st, shade) => {
+        const props = (cs, rs, st, shade, cont = p.r !== r) => {
           let o = `<w:tcW w:w="${width}" w:type="dxa"/>`;
           if (cs > 1) o += `<w:gridSpan w:val="${cs}"/>`;
-          if (rs > 1) o += p.r === r ? '<w:vMerge w:val="restart"/>' : '<w:vMerge/>';
+          if (rs > 1) o += cont ? '<w:vMerge/>' : '<w:vMerge w:val="restart"/>';
           o += cellBorders(st);
           if (shade) o += `<w:shd w:val="clear" w:color="auto" w:fill="${shade}"/>`;
           return o;
         };
         let pr = props(p.cs, p.rs, cell.style, fill);
         // A Compare mark on the cell holds its old look: shading, single-side borders and merging are written as a tracked cell-property change.
-        const look = p.r === r ? [...cell.children].find((e) => e.matches('span.fc') && ('cellStyle' in e.dataset || 'cellSpan' in e.dataset)) : null;
+        const mark = [...cell.children].find((e) => e.matches('span.fc') && ('cellStyle' in e.dataset || 'cellSpan' in e.dataset));
+        // Rows below a merged cell's top carry only the span change (its old state in that row).
+        const look = mark && (p.r === r || ('cellSpan' in mark.dataset && p.c === c)) ? mark : null;
         if (look) {
           const tmp = document.createElement('i');
           tmp.setAttribute('style', 'cellStyle' in look.dataset ? look.dataset.cellStyle : cell.getAttribute('style') || '');
           const was = hex(tmp.style.backgroundColor) || dflt;
           const [wcs, wrs] = 'cellSpan' in look.dataset ? look.dataset.cellSpan.split(',').map(Number) : [p.cs, p.rs];
-          const old = props(wcs, wrs, tmp.style, was);
+          const below = r - p.r;
+          const old = below ? (wrs > below ? props(wcs, wrs, cell.style, fill, true) : props(wcs, 1, cell.style, fill, false)) : props(wcs, wrs, tmp.style, was);
           if (old !== pr) pr += `<w:tcPrChange w:id="${++annId}" w:author="${who(look)}" w:date="${iso(look.dataset.time)}"><w:tcPr>${old}</w:tcPr></w:tcPrChange>`;
         }
         let inner = '<w:p/>';
