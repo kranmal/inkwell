@@ -1044,6 +1044,7 @@ const tests = [
     dlg.returnValue = 'ok'; dlg.dispatchEvent(new Event('close'));
     await sleep(200);
     return { fail: f, info: JSON.stringify(a) };
+  } },
   { name: 'Chart series colours and the value-axis range survive a Word round trip', async run() {
     const { exportDocx, loadScript } = await import('../js/docx.js?t=' + Date.now());
     const { prepare } = await import('../js/docximport.js?t=' + Date.now());
