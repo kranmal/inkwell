@@ -4,6 +4,7 @@ let pending = null;      // range waiting for a new comment
 let editing = null;      // comment id being edited
 let items = [];          // what the list currently shows
 let sig = '';
+let cur = null;          // the change the Next and Previous buttons are on
 const uid = () => 'c' + Date.now().toString(36).slice(-4) + Math.random().toString(36).slice(2, 6);
 const author = () => (api.prefs.author || 'You').trim() || 'You';
 const when = (t) => { const d = new Date(Number(t)); return isNaN(d) ? '' : d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }); };
@@ -291,9 +292,31 @@ function resolveChange(el, accept) {
 function changeAct(act, el) {
   if (act === 'go') { if (el.isConnected) el.scrollIntoView({ block: 'center', behavior: 'smooth' }); return; }
   api.commit();
+  if (el === cur) { const els = changeEls(), i = els.indexOf(el); cur = els[i + 1] || els[i - 1] || null; }
   resolveChange(el, act === 'accept');
   api.done();
   render(true);
+}
+// ---------- next and previous change ----------
+const changeEls = () => [...api.editor.querySelectorAll('ins.tc,del.tc,span.fc')];
+function position() {
+  const els = changeEls(), i = cur && cur.isConnected ? els.indexOf(cur) : -1;
+  api.$('#rv-nav').hidden = !els.length;
+  api.$('#rv-pos').textContent = !els.length ? '' : i < 0 ? `${els.length} ${els.length === 1 ? 'change' : 'changes'}` : `${i + 1} of ${els.length}`;
+  for (const c of api.$$('#rv-list .rv-card')) { const it = items[Number(c.dataset.n)]; c.classList.toggle('cur', !!it && it.el === cur); }
+}
+function stepChange(dir) {
+  const els = changeEls();
+  if (!els.length) { cur = null; api.toast('There are no tracked changes.'); position(); return; }
+  const i = cur && cur.isConnected ? els.indexOf(cur) : -1;
+  cur = els[i < 0 ? (dir > 0 ? 0 : els.length - 1) : (i + dir + els.length) % els.length];
+  const r = document.createRange();
+  r.selectNodeContents(cur);
+  const s = getSelection(); s.removeAllRanges(); s.addRange(r);
+  cur.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  position();
+  const card = api.$('#rv-list .rv-card.cur');
+  if (card) card.scrollIntoView({ block: 'nearest' });
 }
 function allChanges(accept) {
   const els = [...api.editor.querySelectorAll('ins.tc,del.tc,span.fc')];
@@ -333,6 +356,7 @@ function render(force) {
   const { esc, ic } = api;
   const changes = list.filter((i) => i.kind !== 'cm').length;
   api.$('#rv-bulk').hidden = !changes;
+  if (!changes) cur = null;
   api.$('#rv-empty').hidden = list.length > 0;
   api.$('#rv-list').innerHTML = list.slice(0, 300).map((i, n) => {
     const meta = `<span class="rv-who">${esc(i.author || 'Unknown')}</span><span class="rv-when">${esc(when(i.time))}</span>`;
@@ -345,6 +369,7 @@ function render(force) {
       + `<p class="issue-ctx"><b>${i.kind === 'fc' ? 'Formatted: ' + esc(i.label) : i.kind === 'ins' ? 'Added' : 'Deleted'}</b> “${esc(clip(i.quote))}”</p>`
       + `<div class="issue-fix"><button class="link-btn" data-act="accept">Accept</button><button class="link-btn" data-act="reject">Reject</button></div></div>`;
   }).join('');
+  position();
 }
 
 export function init(a) {
@@ -357,6 +382,8 @@ export function init(a) {
   api.cmd('track', () => { setTrack(!api.doc.track); api.changed(true); api.toast(api.doc.track ? 'Track changes is on. Typing and deleting are now marked.' : 'Track changes is off.'); });
   api.cmd('acceptAll', () => allChanges(true));
   api.cmd('rejectAll', () => allChanges(false));
+  api.cmd('nextChange', () => stepChange(1));
+  api.cmd('prevChange', () => stepChange(-1));
 
   const name = $('#rv-author');
   name.value = api.prefs.author || 'You';

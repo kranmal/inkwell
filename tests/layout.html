@@ -502,6 +502,45 @@ const tests = [
     D.querySelector('[data-cmd="reviewPane"]').click();
     return { fail: f, info: `${total} changes, 3 resolved one at a time, ${marks()} left` };
   } },
+  { name: 'Next and Previous change step through the Compare result in order, wrap around, and keep the count after a change is resolved', async run() {
+    const { diffHtml } = await import('../js/compare.js?t=' + Date.now());
+    const r = diffHtml('<p>Alpha one here</p><p>Beta two here</p><p>Gamma three here</p>', '<p>Alpha 1 here</p><p>Beta 2 here</p><p>Gamma 3 here</p>'), f = [];
+    await load(r.html);
+    D.querySelector('[data-cmd="reviewPane"]').click();
+    await sleep(300);
+    const els = () => [...ed.querySelectorAll('ins.tc,del.tc,span.fc')];
+    const pos = () => D.querySelector('#rv-pos').textContent;
+    const press = async (cmd) => { D.querySelector(`[data-cmd="${cmd}"]`).click(); await sleep(120); };
+    const n = els().length;
+    if (n !== 6) f.push(n + ' changes, expected 6');
+    if (D.querySelector('#rv-nav').hidden) f.push('navigation hidden although there are changes');
+    if (pos() !== `${n} changes`) f.push('before stepping the pane says "' + pos() + '"');
+    const seen = [];
+    for (let i = 0; i < n; i++) {
+      await press('nextChange');
+      if (pos() !== `${i + 1} of ${n}`) f.push(`step ${i + 1} says "${pos()}"`);
+      if (D.getSelection().toString() !== els()[i].textContent) f.push(`step ${i + 1} selected "${D.getSelection().toString()}", expected "${els()[i].textContent}"`);
+      seen.push(D.querySelector('#rv-list .rv-card.cur') ? 1 : 0);
+    }
+    if (seen.some((x) => !x)) f.push('the current change was not highlighted in the list');
+    await press('nextChange');
+    if (pos() !== `1 of ${n}`) f.push('Next after the last did not wrap: "' + pos() + '"');
+    await press('prevChange');
+    if (pos() !== `${n} of ${n}`) f.push('Previous from the first did not wrap: "' + pos() + '"');
+    await press('prevChange');
+    if (pos() !== `${n - 1} of ${n}`) f.push('Previous says "' + pos() + '"');
+    // resolve the current change from its card: the count drops and the position stays on the following change
+    D.querySelector('#rv-list .rv-card.cur [data-act="accept"]').click();
+    await sleep(200);
+    if (els().length !== n - 1) f.push('accepting left ' + els().length + ' changes');
+    if (pos() !== `${n - 1} of ${n - 1}`) f.push('after accepting the pane says "' + pos() + '"');
+    // resolve everything: navigation hides
+    D.querySelector('[data-cmd="acceptAll"]').click();
+    await sleep(200);
+    if (!D.querySelector('#rv-nav').hidden) f.push('navigation still shown with no changes');
+    D.querySelector('[data-cmd="reviewPane"]').click();
+    return { fail: f, info: `${n} changes, wraps both ways` };
+  } },
   { name: 'PDF export has one page per layout page, real text, links and bookmarks', async run() {
     await load(`<h1>Heading one</h1><p>Visit <a href="https://example.com/x">our site</a> and <b>read</b> this.</p><p>${lorem(1200)}</p><h2>Second</h2><p>${lorem(300)}</p>`, 1);
     const pdf = await W.eval(`import('${new URL('../js/pdf.js', location.href).href}')`), pages = (await W.eval(`import('${new URL('../js/pages.js', location.href).href}')`)).count();
