@@ -227,6 +227,10 @@ body.painting #editor { cursor: copy; }
 .rv-body { margin: 6px 0 0; font-size: 13px; line-height: 1.45; overflow-wrap: anywhere; white-space: pre-wrap; }
 .rv-card .issue-ctx { margin: 0; color: var(--muted); }
 .rv-card.resolved { opacity: .6; }
+.rv-card.cur { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.rv-nav { display: flex; align-items: center; gap: 8px; }
+.rv-nav .btn { flex: none; }
+.rv-nav #rv-pos { flex: 1; text-align: center; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .rv-card ins { color: #1a7f4b; text-decoration: underline; } .rv-card del { color: var(--danger); }
 #st-track { color: var(--accent-ink); font-weight: 600; }
 .rb[aria-pressed="true"] { background: var(--active); color: var(--accent-ink); }

@@ -9,7 +9,7 @@ A word processor that runs entirely in the browser. Live at https://kranmal.gith
 - Footnotes, endnotes and a table of contents that follows your headings and page numbers
 - Tables with merged and split cells, shading, border styles and drag-to-resize columns
 - Shapes, text boxes and charts (column, bar, line, pie) built from data you type in
-- Comments and track changes, with accept and reject, and **Compare** to see what changed since a saved version or another file
+- Comments and track changes, with accept and reject, Next and Previous buttons that step through the changes (with a "3 of 17" count), and **Compare** to see what changed since a saved version or another file
 - Pictures, links, page breaks, symbols
 - Spelling (UK and US English) and rule-based grammar checking, with a proofing score
 - **Accessibility checker** (Review tab): flags pictures without alt text (and lets you type it in place), charts without a title, skipped or empty headings, tables without a header row, vague link text, low colour contrast and runs of blank paragraphs
