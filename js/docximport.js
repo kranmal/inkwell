@@ -208,11 +208,11 @@ async function readSmart(zip) {
 function mark(doc, comments, notes, sects, charts, smart) {
   const refs = [];                       // note references in document order
   const active = new Set();
-  const after = (host, text) => {        // a paragraph holding only a marker, placed right after `host`
+  const after = (host, text, first) => {        // a paragraph holding only a marker, placed right after `host` (or right before it, for a floating object that wraps from its paragraph on)
     const p = doc.createElementNS(W, 'w:p'), r = doc.createElementNS(W, 'w:r'), t = doc.createElementNS(W, 'w:t');
     t.textContent = `${O}${text}${M}${C}`;
     r.append(t); p.append(r);
-    host.parentNode.insertBefore(p, host.nextSibling);
+    host.parentNode.insertBefore(p, first ? host : host.nextSibling);
   };
   // Section breaks: each sectPr inside a paragraph ends a section; the break carries the next section's settings.
   if (sects && sects.length > 1) {
@@ -221,6 +221,29 @@ function mark(doc, comments, notes, sects, charts, smart) {
       after(sp.parentNode.parentNode, `S|${enc(JSON.stringify(sectData(sects[k], sects[k + 1])))}`);
     });
   }
+  // An anchored (floating) drawing: when the text wraps around it and it sits to one side, it floats left or right instead of standing alone.
+  const textArea = (() => {
+    const sp = kids(doc.documentElement, 'sectPr').pop(), g = (el, n) => (el ? Number(attr(el, n)) || 0 : 0);
+    const sz = sp && [...sp.children].find((c) => c.localName === 'pgSz'), mg = sp && [...sp.children].find((c) => c.localName === 'pgMar');
+    const page = (g(sz, 'w') || 11906) * 635, side = (g(mg, 'left') || 1440) * 635 + (g(mg, 'right') || 1440) * 635;
+    return { page, text: Math.max(1, page - side) };
+  })();
+  const anchorSide = (shape) => {
+    const an = shape && [...shape.getElementsByTagName('*')].find((e) => e.localName === 'anchor');
+    if (!an) return { side: '', wide: 0 };
+    const sub = (el, n) => [...el.children].find((c) => c.localName === n);
+    const ex = sub(an, 'extent'), cx = ex ? Number(attr(ex, 'cx')) || 0 : 0, wide = Math.round(cx / 9525);
+    const none = { side: '', wide };
+    if (attr(an, 'behindDoc') === '1' || attr(an, 'behindDoc') === 'true') return none;
+    if (![...an.children].some((c) => ['wrapSquare', 'wrapTight', 'wrapThrough'].includes(c.localName))) return none;
+    const ph = sub(an, 'positionH');
+    if (!ph) return none;
+    const al = sub(ph, 'align'), off = sub(ph, 'posOffset'), area = attr(ph, 'relativeFrom') === 'page' ? textArea.page : textArea.text;
+    if (cx > area * 0.7) return none;               // nearly full width: nothing to wrap beside
+    if (al) { const v = al.textContent.trim(); return { side: v === 'left' || v === 'inside' ? 'left' : v === 'right' || v === 'outside' ? 'right' : '', wide }; }
+    if (off) return { side: (Number(off.textContent) || 0) + cx / 2 < area / 2 ? 'left' : 'right', wide };
+    return none;
+  };
   // Charts: the chart becomes a paragraph of its own after the host paragraph, and the drawing goes.
   if (charts && charts.size) {
     for (const ch of [...doc.getElementsByTagNameNS(CNS, 'chart')]) {
@@ -232,7 +255,8 @@ function mark(doc, comments, notes, sects, charts, smart) {
         if (n.localName === 'AlternateContent') top = n;
       }
       if (!cfg || !host || !top) continue;
-      after(host, `H|${enc(JSON.stringify(cfg))}`);
+      const an = anchorSide(top);
+      after(host, `H|${enc(JSON.stringify(cfg))}|${an.side}|${an.side ? an.wide : 0}`, !!an.side);
       top.remove();
     }
   }
@@ -265,7 +289,8 @@ function mark(doc, comments, notes, sects, charts, smart) {
     }
     if (fallback || !host) continue;
     const html = kids(tb, 'p').map(paraHtml).map((h) => `<p>${h || '<br>'}</p>`).join('');
-    if (html) after(host, `X|${wide}|${enc(html)}`);
+    const an = anchorSide(shape);
+    if (html) after(host, `X|${wide}|${enc(html)}|${an.side}`, !!an.side);
   }
   // Drop the drawings and their VML fallbacks so the text is not read twice.
   for (const tb of kids(doc.documentElement, 'txbxContent')) {
@@ -465,8 +490,9 @@ function unmark(html, comments, notes) {
         return `<span class="cm" data-cm="${used.get(id)}" data-author="${esc(dec(f[2]))}" data-time="${esc(f[3])}" data-text="${esc(dec(f[4]))}">${body}</span>`;
       }
       if (f[0] === 'S') return `<div class="page-break sect-break" contenteditable="false" data-sect="${esc(dec(f[1]))}"></div>`;
-      if (f[0] === 'X') return `<div class="textbox"${Number(f[1]) > 40 ? ` style="width:${Math.min(Number(f[1]), 720)}px"` : ''}>${dec(f[2])}</div>`;
-      if (f[0] === 'H') return `<figure class="chart" data-chart="${esc(dec(f[1]))}" contenteditable="false"></figure>`;
+      const floatCss = (side) => (side === 'left' ? 'float:left;margin:4px 14px 8px 0;' : side === 'right' ? 'float:right;margin:4px 0 8px 14px;' : '');
+      if (f[0] === 'X') { const st = (Number(f[1]) > 40 ? `width:${Math.min(Number(f[1]), 720)}px;` : '') + floatCss(f[3]); return `<div class="textbox"${st ? ` style="${st}"` : ''}>${dec(f[2])}</div>`; }
+      if (f[0] === 'H') { const st = (f[2] && Number(f[3]) > 40 ? `width:${Math.min(Number(f[3]), 720)}px;` : '') + floatCss(f[2]); return `<figure class="chart" data-chart="${esc(dec(f[1]))}"${st ? ` style="${st}"` : ''} contenteditable="false"></figure>`; }
       if (f[0] === 'G') return `<figure class="smartart" data-sa="${esc(dec(f[1]))}" contenteditable="false"></figure>`;
       if (f[0] === 'N') {
         const kind = f[1], id = dec(f[2]);
