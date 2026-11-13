@@ -170,6 +170,13 @@ export async function exportDocx(root, { title = 'Document', page, hf = null, st
   // ----- editable objects: charts, shapes, text boxes -----
   const charts = [];
   let drawN = 500;
+  // A chart or text box floated left or right in Inkwell is written as an anchored drawing with square wrapping, so Word wraps text beside it.
+  function floatAnchor(el, xml, cx) {
+    const side = el.style.float;
+    if ((side !== 'left' && side !== 'right') || cx > contentMm / 25.4 * 96 * EMU_PX * 0.7) return xml;
+    return xml.replace(/<wp:inline [^>]*>/, `<wp:anchor distT="38100" distB="76200" distL="${side === 'right' ? 133350 : 0}" distR="${side === 'left' ? 133350 : 0}" simplePos="0" relativeHeight="0" behindDoc="0" locked="0" layoutInCell="1" allowOverlap="1"><wp:simplePos x="0" y="0"/><wp:positionH relativeFrom="margin"><wp:align>${side}</wp:align></wp:positionH><wp:positionV relativeFrom="paragraph"><wp:posOffset>0</wp:posOffset></wp:positionV>`)
+      .replace(/(<wp:extent [^>]*\/>)/, '$1<wp:wrapSquare wrapText="bothSides"/>').replace('</wp:inline>', '</wp:anchor>');
+  }
   const A = 'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"';
   function chartRun(el) {
     const cfg = readCfg(el);
@@ -178,7 +185,7 @@ export async function exportDocx(root, { title = 'Document', page, hf = null, st
     const id = rel('http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart', `charts/chart${n}.xml`);
     const w = Math.min(contentMm / 25.4 * 96, parseFloat(el.style.width) || 640), h = w * 360 / 640;
     const cx = Math.round(w * EMU_PX), cy = Math.round(h * EMU_PX), k = ++drawN;
-    return `<w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="${cx}" cy="${cy}"/><wp:docPr id="${k}" name="Chart ${n}" descr="${esc(cfg.title || 'Chart')}"/><wp:cNvGraphicFramePr/><a:graphic ${A}><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/chart"><c:chart r:id="${id}"/></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>`;
+    return floatAnchor(el, `<w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="${cx}" cy="${cy}"/><wp:docPr id="${k}" name="Chart ${n}" descr="${esc(cfg.title || 'Chart')}"/><wp:cNvGraphicFramePr/><a:graphic ${A}><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/chart"><c:chart r:id="${id}"/></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>`, cx);
   }
   const smarts = [];
   function smartRun(el) {
@@ -487,7 +494,7 @@ export async function exportDocx(root, { title = 'Document', page, hf = null, st
     if (!/<\/w:p>$/.test(inner)) inner += '<w:p/>';
     const cx = Math.round(wpx * EMU_PX), cy = Math.round(hpx * EMU_PX), k = ++drawN;
     const bg = hex(el.style.backgroundColor);
-    return `<w:p><w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="${cx}" cy="${cy}"/><wp:docPr id="${k}" name="Text Box ${k}"/><wp:cNvGraphicFramePr/><a:graphic ${A}><a:graphicData uri="http://schemas.microsoft.com/office/word/2010/wordprocessingShape"><wps:wsp><wps:cNvSpPr txBox="1"/><wps:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom>${bg ? `<a:solidFill><a:srgbClr val="${bg}"/></a:solidFill>` : '<a:noFill/>'}<a:ln w="9525"><a:solidFill><a:srgbClr val="9A9A9A"/></a:solidFill></a:ln></wps:spPr><wps:txbx><w:txbxContent>${inner}</w:txbxContent></wps:txbx><wps:bodyPr lIns="91440" tIns="45720" rIns="91440" bIns="45720"><a:noAutofit/></wps:bodyPr></wps:wsp></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>`;
+    return floatAnchor(el, `<w:p><w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="${cx}" cy="${cy}"/><wp:docPr id="${k}" name="Text Box ${k}"/><wp:cNvGraphicFramePr/><a:graphic ${A}><a:graphicData uri="http://schemas.microsoft.com/office/word/2010/wordprocessingShape"><wps:wsp><wps:cNvSpPr txBox="1"/><wps:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom>${bg ? `<a:solidFill><a:srgbClr val="${bg}"/></a:solidFill>` : '<a:noFill/>'}<a:ln w="9525"><a:solidFill><a:srgbClr val="9A9A9A"/></a:solidFill></a:ln></wps:spPr><wps:txbx><w:txbxContent>${inner}</w:txbxContent></wps:txbx><wps:bodyPr lIns="91440" tIns="45720" rIns="91440" bIns="45720"><a:noAutofit/></wps:bodyPr></wps:wsp></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>`, cx);
   }
 
   function block(el, env) {
