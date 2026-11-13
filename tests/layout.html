@@ -186,6 +186,19 @@ const tests = [
     if (same.changes || same.html.indexOf('class="tc"') >= 0) f.push('identical documents reported changes');
     return { fail: f, info: JSON.stringify(r.stats) };
   } },
+  { name: 'PDF export has one page per layout page, real text, links and bookmarks', async run() {
+    await load(`<h1>Heading one</h1><p>Visit <a href="https://example.com/x">our site</a> and <b>read</b> this.</p><p>${lorem(1200)}</p><h2>Second</h2><p>${lorem(300)}</p>`, 1);
+    const pdf = await W.eval(`import('${new URL('../js/pdf.js', location.href).href}')`), pages = (await W.eval(`import('${new URL('../js/pages.js', location.href).href}')`)).count();
+    const r = await pdf.buildPdf(), f = [];
+    const txt = new TextDecoder('latin1').decode(new Uint8Array(await r.blob.arrayBuffer()));
+    if (!txt.startsWith('%PDF-') || !/%%EOF\s*$/.test(txt)) f.push('not a well-formed file');
+    if (r.pages !== pages) f.push(`${r.pages} PDF pages for ${pages} layout pages`);
+    if ((txt.match(/\/Type \/Page /g) || []).length !== pages) f.push('page objects do not match');
+    if (txt.indexOf('/URI (https://example.com/x)') < 0) f.push('link annotation missing');
+    if (txt.indexOf('/Outlines') < 0) f.push('bookmarks missing');
+    if (pages < 2) f.push('test document did not span pages');
+    return { fail: f, info: `${r.pages} pages, ${Math.round(r.blob.size / 1024)} KB` };
+  } },
   { name: 'Back to 1 column removes every temporary wrapper', async run() {
     await load(longText(), 2); await setCols(1);
     const n = ed.querySelectorAll('.pgs-part').length;

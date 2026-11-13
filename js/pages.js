@@ -9,6 +9,8 @@ const ALIGNS = ['left', 'center', 'right'];
 export const hf = () => ({ ...HF0, ...((api && api.doc && api.doc.hf) || {}) });
 export const count = () => n;
 export const sections = () => secs;
+// Page rectangles in px relative to the page element, for exporters: top, height, width, and the sheet area width they are centred in.
+export const geometry = () => ({ pgs: pgs.slice(0, n).map((g) => ({ top: g.top, h: g.h, w: g.w })), W: pageWmm * api.MM });
 const parseSect = (el) => { try { return JSON.parse(el.dataset.sect || '{}') || {}; } catch { return {}; } };
 // The header/footer settings and page-number offset that apply on page index i (0-based).
 function hfFor(i) {
