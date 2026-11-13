@@ -261,6 +261,8 @@ export async function exportDocx(root, { title = 'Document', page, hf = null, st
       return `<w:r><w:rPr><w:vertAlign w:val="superscript"/></w:rPr><w:${kind === 'fn' ? 'footnote' : 'endnote'}Reference w:id="${notes[kind].length}"/></w:r>`;
     }
     if (t === 'SPAN' && cl.contains('fc') && !plain) {
+      // Table shading, borders and column widths are marked in the page only: Word has no run-level record of them.
+      if ('cellStyle' in node.dataset || 'tableClass' in node.dataset || 'tableCols' in node.dataset) return kids(node, f);
       // Tracked formatting: the runs carry the new look; w:rPrChange holds what they looked like before.
       const tmp = document.createElement('div');
       tmp.innerHTML = node.dataset.was || '';
@@ -330,7 +332,19 @@ export async function exportDocx(root, { title = 'Document', page, hf = null, st
     return x ? `<w:pPr>${x}</w:pPr>` : '';
   }
 
-  const para = (el, env, runs) => `<w:p>${pPr(el, env)}${runs}</w:p>`;
+  // A paragraph that is wholly an insertion or a deletion has its paragraph mark tracked too, so accepting or rejecting in Word
+  // removes the paragraph instead of leaving an empty one behind.
+  const para = (el, env, runs) => {
+    let p = pPr(el, env);
+    const kidsOf = [...el.childNodes].filter((n) => n.nodeType !== 3 || n.data.trim());
+    const first = kidsOf[0];
+    if (first && first.nodeType === 1 && first.matches('ins.tc,del.tc') && kidsOf.every((n) => n.nodeType === 1 && n.matches(first.tagName === 'INS' ? 'ins.tc' : 'del.tc'))) {
+      const tag = first.tagName === 'INS' ? 'ins' : 'del';
+      const mark = `<w:rPr><w:${tag} w:id="${++annId}" w:author="${who(first)}" w:date="${iso(first.dataset.time)}"/></w:rPr>`;
+      p = p ? p.replace('</w:pPr>', mark + '</w:pPr>') : `<w:pPr>${mark}</w:pPr>`;
+    }
+    return `<w:p>${p}${runs}</w:p>`;
+  };
 
   function list(el, env) {
     const lvl = env.list ? env.list.lvl + 1 : 0;
