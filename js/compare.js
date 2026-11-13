@@ -207,7 +207,7 @@ function markText(el, src, time) {
       let top = at;                                  // take in the formatting around the words when it holds nothing else
       while (top.parentElement && top.parentElement !== el && (FTAG[top.parentElement.tagName] || top.parentElement.tagName === 'SPAN' || top.parentElement.tagName === 'A') && !top.parentElement.matches('.fc,.cm,.tc') && norm(top.parentElement.textContent) === norm(at.textContent)) top = top.parentElement;
       const w = document.createElement('span');
-      w.className = 'fc'; w.dataset.author = AUTHOR; w.dataset.time = String(time); w.dataset.label = x.label; w.dataset.was = wasHtml(src, x.run);
+      w.className = 'fc'; w.dataset.author = AUTHOR; w.dataset.time = String(time); w.dataset.label = x.label; w.dataset.was = wasHtml(src, x.run); w.dataset.lift = '1';
       top.replaceWith(w); w.append(top);
       continue;
     }
