@@ -938,7 +938,27 @@ const tests = [
     if (/<w:tcPrChange[\s\S]*?<\/w:tcPrChange><w:/.test(xml.replace(/<\/w:tcPrChange><\/w:tcPr>/g, ''))) f.push('tcPrChange must be last in tcPr');
     const ids = [...xml.matchAll(/<w:(?:ins|del|rPrChange|tcPrChange) w:id="(\d+)"/g)].map((m) => m[1]);
     if (new Set(ids).size !== ids.length) f.push('tracked change ids repeat');
-    return { fail: f, info: tc.length + ' cell changes' };
+    const { prepare } = await import('../js/docximport.js?t=' + Date.now());
+    const mammoth = await loadScript('../vendor/mammoth.browser.min.js', 'mammoth');
+    const buf = await (await exportDocx(root, { title: 't', page: { w: 210, h: 297, m: { t: 25, r: 25, b: 25, l: 25 } } })).arrayBuffer();
+    const rich = await prepare(JSZip, buf);
+    const box = document.createElement('div');
+    box.innerHTML = rich.finish((await mammoth.convertToHtml({ arrayBuffer: rich.buffer })).value);
+    const marks = [...box.querySelectorAll('span.fc')];
+    const bordered = marks.find((m) => /borders/.test(m.dataset.label));
+    if (!bordered) f.push('the border change did not come back: ' + box.innerHTML);
+    else if (!/border-top: 3px solid (#ff0000|rgb\(255, 0, 0\))/.test(bordered.closest('td').getAttribute('style') || '')) f.push('the new border is not on the cell: ' + bordered.closest('td').outerHTML);
+    const wide = marks.find((m) => m.dataset.cellSpan === '2,1');
+    if (!wide) f.push('the old merged span did not come back: ' + marks.map((m) => m.outerHTML).join(' '));
+    if (bordered && wide) {
+      await load(box.innerHTML);
+      D.querySelector('[data-cmd="rejectAll"]').click();
+      await sleep(250);
+      const row = ed.querySelectorAll('tr')[0], last = ed.querySelectorAll('tr')[1];
+      if (/border/.test(row.cells[1].getAttribute('style') || '')) f.push('Reject left the border');
+      if (last.cells[0].colSpan !== 2) f.push('Reject did not merge the cell back: ' + ed.querySelector('table').outerHTML);
+    }
+    return { fail: f, info: tc.length + ' cell changes, ' + marks.length + ' marks' };
   } },
   { name: 'Back to 1 column removes every temporary wrapper', async run() {
     await load(longText(), 2); await setCols(1);
