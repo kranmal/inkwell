@@ -917,6 +917,29 @@ const tests = [
     if (ed.querySelectorAll('td')[1].getAttribute('style')) f.push('rejecting did not remove the borders: ' + ed.querySelector('table').outerHTML);
     return { fail: f };
   } },
+  { name: 'Compare merged cells and cell borders export as Word cell borders and a tracked cell-property change', async run() {
+    const { diffHtml } = await import('../js/compare.js?t=' + Date.now());
+    const { exportDocx, loadScript } = await import('../js/docx.js?t=' + Date.now());
+    const oldH = '<table><tbody><tr><td>A</td><td>B</td></tr><tr><td colspan="2">Wide</td></tr></tbody></table>';
+    const newH = '<table><tbody><tr><td>A</td><td style="border-top:3px solid #ff0000">B</td></tr><tr><td>Wide</td><td></td></tr></tbody></table>';
+    const r = diffHtml(oldH, newH), f = [];
+    const root = document.createElement('div');
+    root.innerHTML = r.html;
+    const JSZip = await loadScript('../vendor/jszip.min.js', 'JSZip');
+    const zip = await JSZip.loadAsync(await (await exportDocx(root, { title: 't', page: { w: 210, h: 297, m: { t: 25, r: 25, b: 25, l: 25 } } })).arrayBuffer());
+    const xml = await zip.file('word/document.xml').async('string');
+    const dom = new DOMParser().parseFromString(xml, 'application/xml');
+    if (dom.querySelector('parsererror')) f.push('document.xml is not well-formed');
+    if (!/<w:tcBorders><w:top w:val="single" w:sz="18" w:space="0" w:color="FF0000"\/><\/w:tcBorders>/.test(xml)) f.push('the new top border is not written as tcBorders');
+    const tc = xml.match(/<w:tcPrChange [^>]*><w:tcPr>(?:(?!<\/w:tcPr>)[\s\S])*<\/w:tcPr><\/w:tcPrChange>/g) || [];
+    if (tc.length < 1) f.push('no tracked cell-property change was written');
+    if (!tc.some((x) => /gridSpan w:val="2"/.test(x))) f.push('the old merged width is not recorded: ' + tc.join(' || '));
+    if (tc.some((x) => /tcBorders/.test(x))) f.push('the old state has no borders, so none should be recorded');
+    if (/<w:tcPrChange[\s\S]*?<\/w:tcPrChange><w:/.test(xml.replace(/<\/w:tcPrChange><\/w:tcPr>/g, ''))) f.push('tcPrChange must be last in tcPr');
+    const ids = [...xml.matchAll(/<w:(?:ins|del|rPrChange|tcPrChange) w:id="(\d+)"/g)].map((m) => m[1]);
+    if (new Set(ids).size !== ids.length) f.push('tracked change ids repeat');
+    return { fail: f, info: tc.length + ' cell changes' };
+  } },
   { name: 'Back to 1 column removes every temporary wrapper', async run() {
     await load(longText(), 2); await setCols(1);
     const n = ed.querySelectorAll('.pgs-part').length;

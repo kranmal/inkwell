@@ -114,6 +114,20 @@ export async function exportDocx(root, { title = 'Document', page, hf = null, st
 
   // ----- notes, comments and tracked changes -----
   let plain = false;            // inside notes/comments: no relationships (links, pictures)
+  // A cell's own borders (top, left, bottom, right) from its inline style; sides it does not set are left to the table.
+  const BSTYLE = { solid: 'single', dashed: 'dashed', dotted: 'dotted', double: 'double', none: 'nil', hidden: 'nil' };
+  const cellBorders = (st) => {
+    let o = '';
+    for (const [css, tag] of [['Top', 'top'], ['Left', 'left'], ['Bottom', 'bottom'], ['Right', 'right']]) {
+      const sty = st['border' + css + 'Style'];
+      if (!sty) continue;
+      const val = BSTYLE[sty] || 'single';
+      if (val === 'nil') { o += `<w:${tag} w:val="nil"/>`; continue; }
+      const px = parseFloat(st['border' + css + 'Width']) || 1;
+      o += `<w:${tag} w:val="${val}" w:sz="${Math.min(96, Math.max(2, Math.round(px * 6)))}" w:space="0" w:color="${hex(st['border' + css + 'Color']) || 'auto'}"/>`;
+    }
+    return o ? `<w:tcBorders>${o}</w:tcBorders>` : '';
+  };
   let annId = 0;
   const iso = (t) => { const d = new Date(Number(t) || Date.now()); return (isNaN(d) ? new Date() : d).toISOString().replace(/\.\d+Z$/, 'Z'); };
   const who = (el) => esc(el.dataset.author || author || 'Author');
@@ -395,18 +409,27 @@ export async function exportDocx(root, { title = 'Document', page, hf = null, st
         if (p.c !== c) continue;
         const width = cw.slice(c, c + p.cs).reduce((a2, b2) => a2 + b2, 0);
         const head = cell.tagName === 'TH';
-        const fill = hex(cell.style.backgroundColor) || (head ? 'F2F2F0' : cl.contains('tb-striped') && tr.rowIndex % 2 === 1 ? 'F3F5F4' : null);
-        let pr = `<w:tcW w:w="${width}" w:type="dxa"/>`;
-        if (p.cs > 1) pr += `<w:gridSpan w:val="${p.cs}"/>`;
-        if (p.rs > 1) pr += p.r === r ? '<w:vMerge w:val="restart"/>' : '<w:vMerge/>';
-        if (fill) pr += `<w:shd w:val="clear" w:color="auto" w:fill="${fill}"/>`;
-        // A Compare mark on the cell records its old style: the shading it had is written as a tracked cell-property change.
-        const look = p.r === r ? [...cell.children].find((e) => e.matches('span.fc') && 'cellStyle' in e.dataset) : null;
+        const dflt = head ? 'F2F2F0' : cl.contains('tb-striped') && tr.rowIndex % 2 === 1 ? 'F3F5F4' : null;
+        const fill = hex(cell.style.backgroundColor) || dflt;
+        // Cell properties in schema order: width, merge, borders, shading.
+        const props = (cs, rs, st, shade) => {
+          let o = `<w:tcW w:w="${width}" w:type="dxa"/>`;
+          if (cs > 1) o += `<w:gridSpan w:val="${cs}"/>`;
+          if (rs > 1) o += p.r === r ? '<w:vMerge w:val="restart"/>' : '<w:vMerge/>';
+          o += cellBorders(st);
+          if (shade) o += `<w:shd w:val="clear" w:color="auto" w:fill="${shade}"/>`;
+          return o;
+        };
+        let pr = props(p.cs, p.rs, cell.style, fill);
+        // A Compare mark on the cell holds its old look: shading, single-side borders and merging are written as a tracked cell-property change.
+        const look = p.r === r ? [...cell.children].find((e) => e.matches('span.fc') && ('cellStyle' in e.dataset || 'cellSpan' in e.dataset)) : null;
         if (look) {
           const tmp = document.createElement('i');
-          tmp.setAttribute('style', look.dataset.cellStyle);
-          const was = hex(tmp.style.backgroundColor) || (head ? 'F2F2F0' : cl.contains('tb-striped') && tr.rowIndex % 2 === 1 ? 'F3F5F4' : null);
-          if (was !== fill) pr += `<w:tcPrChange w:id="${++annId}" w:author="${who(look)}" w:date="${iso(look.dataset.time)}"><w:tcPr><w:tcW w:w="${width}" w:type="dxa"/>${p.cs > 1 ? `<w:gridSpan w:val="${p.cs}"/>` : ''}${was ? `<w:shd w:val="clear" w:color="auto" w:fill="${was}"/>` : ''}</w:tcPr></w:tcPrChange>`;
+          tmp.setAttribute('style', 'cellStyle' in look.dataset ? look.dataset.cellStyle : cell.getAttribute('style') || '');
+          const was = hex(tmp.style.backgroundColor) || dflt;
+          const [wcs, wrs] = 'cellSpan' in look.dataset ? look.dataset.cellSpan.split(',').map(Number) : [p.cs, p.rs];
+          const old = props(wcs, wrs, tmp.style, was);
+          if (old !== pr) pr += `<w:tcPrChange w:id="${++annId}" w:author="${who(look)}" w:date="${iso(look.dataset.time)}"><w:tcPr>${old}</w:tcPr></w:tcPrChange>`;
         }
         let inner = '<w:p/>';
         if (p.r === r) {
