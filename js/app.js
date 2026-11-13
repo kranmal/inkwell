@@ -1402,6 +1402,7 @@ document.addEventListener('keydown', (e) => {
   if (typing || $('dialog[open]') || !$('#backstage').hidden) return;
   if (k === 'z') { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
   if (k === 'y' && !isMac) { e.preventDefault(); redo(); return; }
+  if (e.altKey && (e.code === 'BracketRight' || e.code === 'BracketLeft')) { e.preventDefault(); run(e.code === 'BracketRight' ? 'nextChange' : 'prevChange'); return; }
   if (k === 'k') { e.preventDefault(); openLink(); return; }
   if (e.key === 'Enter') { e.preventDefault(); run('pageBreak'); return; }
   if (e.altKey && /^Digit[0-3]$/.test(e.code)) { e.preventDefault(); applyStyle(['normal', 'h1', 'h2', 'h3'][Number(e.code.slice(5))]); }

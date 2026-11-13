@@ -529,6 +529,15 @@ const tests = [
     if (pos() !== `${n} of ${n}`) f.push('Previous from the first did not wrap: "' + pos() + '"');
     await press('prevChange');
     if (pos() !== `${n - 1} of ${n}`) f.push('Previous says "' + pos() + '"');
+    // keyboard: Ctrl+Alt+] and Ctrl+Alt+[ do the same from the document
+    const key = (code) => { const ev = new KeyboardEvent('keydown', { code, key: code === 'BracketRight' ? ']' : '[', ctrlKey: true, metaKey: true, altKey: true, bubbles: true, cancelable: true }); ed.dispatchEvent(ev); return ev.defaultPrevented; };
+    const before = pos();
+    if (!key('BracketRight')) f.push('Ctrl+Alt+] was not handled');
+    await sleep(120);
+    if (pos() === before) f.push('Ctrl+Alt+] did not move: "' + pos() + '"');
+    if (!key('BracketLeft')) f.push('Ctrl+Alt+[ was not handled');
+    await sleep(120);
+    if (pos() !== before) f.push('Ctrl+Alt+[ did not move back: "' + pos() + '"');
     // resolve the current change from its card: the count drops and the position stays on the following change
     D.querySelector('#rv-list .rv-card.cur [data-act="accept"]').click();
     await sleep(200);
