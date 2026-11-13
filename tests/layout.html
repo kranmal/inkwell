@@ -439,6 +439,30 @@ const tests = [
     }
     return { fail: f, info: JSON.stringify(r.stats) };
   } },
+  { name: 'Compare marks changed, added and removed text boxes and WordArt, and Accept all and Reject all give back the new and the old ones', async run() {
+    const { diffHtml } = await import('../js/compare.js?t=' + Date.now());
+    const tb = (t) => `<div class="textbox" style="width: 260px;"><p>${t}</p></div>`;
+    const wa = (t) => `<span class="wordart wa-solid" contenteditable="false" style="font-size: 36pt;">${t}</span>`;
+    const old = `<p>Intro</p>${tb('Alpha box')}<p>Title ${wa('Big')} here</p>${tb('Beta box')}<p>Gone ${wa('Old')} there</p>`;
+    const cur = `<p>Intro</p>${tb('Alpha changed')}<p>Title ${wa('Bigger')} here</p><p>Gone there</p><p>New ${wa('Fresh')}</p>`;
+    const r = diffHtml(old, cur), f = [];
+    if (r.stats.unmarked) f.push('left unmarked: ' + JSON.stringify(r.stats));
+    if (r.stats.edited !== 2 || r.stats.removed !== 2 || r.stats.added !== 1) f.push('stats ' + JSON.stringify(r.stats));
+    const box = document.createElement('div'); box.innerHTML = r.html;
+    if ([...box.querySelectorAll('ins.tc .textbox, ins.tc .wordart')].filter((q) => q.textContent !== 'Fresh').length !== 2) f.push('changed text box and WordArt not marked inserted');
+    if (!/Fresh/.test(box.lastElementChild.querySelector('ins.tc .wordart')?.textContent || '')) f.push('added paragraph with WordArt not marked');
+    if (box.querySelectorAll('del.tc > .textbox, del.tc > .wordart').length !== 4) f.push('old and removed ones not shown deleted');
+    if (diffHtml(old, old).changes) f.push('identical document reported changes');
+    const texts = (html) => { const b = document.createElement('div'); b.innerHTML = html; return [...b.querySelectorAll('.textbox,.wordart')].map((q) => q.textContent).join('|'); };
+    for (const [cmd, want] of [['acceptAll', texts(cur)], ['rejectAll', texts(old)]]) {
+      await load(r.html);
+      D.querySelector(`[data-cmd="${cmd}"]`).click();
+      await sleep(300);
+      if (ed.querySelector('ins.tc,del.tc')) f.push(cmd + ' left marks');
+      if (texts(ed.innerHTML) !== want) f.push(cmd + ' gave ' + texts(ed.innerHTML) + ', expected ' + want);
+    }
+    return { fail: f, info: JSON.stringify(r.stats) };
+  } },
   { name: 'PDF export has one page per layout page, real text, links and bookmarks', async run() {
     await load(`<h1>Heading one</h1><p>Visit <a href="https://example.com/x">our site</a> and <b>read</b> this.</p><p>${lorem(1200)}</p><h2>Second</h2><p>${lorem(300)}</p>`, 1);
     const pdf = await W.eval(`import('${new URL('../js/pdf.js', location.href).href}')`), pages = (await W.eval(`import('${new URL('../js/pages.js', location.href).href}')`)).count();
