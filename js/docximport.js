@@ -98,8 +98,74 @@ function sectData(prev, next) {
   return d;
 }
 
+
+// ----- native Word charts -> Inkwell chart configs -----
+const CNS = 'http://schemas.openxmlformats.org/drawingml/2006/chart';
+const RNS = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
+const cKids = (el, n) => [...el.getElementsByTagNameNS(CNS, n)];
+const cFirst = (el, n) => el.getElementsByTagNameNS(CNS, n)[0] || null;
+const cVal = (el) => { const v = el && el.getAttribute('val'); return v == null ? '' : v; };
+// Text points of a c:strRef/c:numRef/c:strLit/c:numLit cache, in index order.
+function cache(el) {
+  if (!el) return null;
+  const pts = [];
+  for (const pt of cKids(el, 'pt')) { const v = cFirst(pt, 'v'); pts[Number(pt.getAttribute('idx'))] = v ? v.textContent : ''; }
+  const n = cFirst(el, 'ptCount');
+  const len = Math.max(pts.length, n ? Number(n.getAttribute('val')) || 0 : 0);
+  return Array.from({ length: len }, (_, i) => pts[i] == null ? '' : pts[i]);
+}
+const KINDS = { barChart: 'column', bar3DChart: 'column', lineChart: 'line', line3DChart: 'line', areaChart: 'area', area3DChart: 'area', pieChart: 'pie', pie3DChart: 'pie', doughnutChart: 'donut', scatterChart: 'scatter', radarChart: 'radar' };
+export function chartConfig(doc) {
+  const plot = cFirst(doc.documentElement, 'plotArea');
+  if (!plot) return null;
+  const groups = [...plot.children].filter((c) => c.namespaceURI === CNS && KINDS[c.localName]);
+  if (!groups.length) return null;
+  const first = groups[0];
+  let type = KINDS[first.localName];
+  if (first.localName.startsWith('bar')) {
+    const bar = cVal(cFirst(first, 'barDir')) === 'bar';
+    const grouping = cVal(cFirst(first, 'grouping'));
+    type = bar ? 'bar' : (grouping === 'stacked' || grouping === 'percentStacked') ? 'stacked' : 'column';
+  }
+  if (type === 'column' && groups.some((g) => g.localName === 'lineChart')) type = 'combo';
+  const series = [];
+  let labels = [];
+  groups.forEach((g, gi) => {
+    for (const ser of [...g.children].filter((c) => c.localName === 'ser')) {
+      const name = cache(cFirst(ser, 'tx'));
+      const cat = cFirst(ser, type === 'scatter' ? 'xVal' : 'cat');
+      const lab = cat ? cache(cFirst(cat, 'strCache') || cFirst(cat, 'numCache') || cFirst(cat, 'strLit') || cFirst(cat, 'numLit')) : null;
+      const valEl = cFirst(ser, type === 'scatter' ? 'yVal' : 'val');
+      const vals = valEl ? cache(cFirst(valEl, 'numCache') || cFirst(valEl, 'numLit')) : null;
+      if (!vals) continue;
+      if (lab && lab.length > labels.length) labels = lab;
+      series.push({ name: (name && name[0]) || `Series ${series.length + 1}`, values: vals.map((v) => { const n = parseFloat(v); return isFinite(n) ? n : 0; }) });
+    }
+  });
+  if (!series.length) return null;
+  const n = Math.max(...series.map((s) => s.values.length));
+  labels = Array.from({ length: n }, (_, i) => labels[i] != null && labels[i] !== '' ? String(labels[i]) : String(i + 1));
+  for (const s of series) while (s.values.length < n) s.values.push(0);
+  const t = cFirst(doc.documentElement, 'title');
+  const title = t ? [...t.getElementsByTagNameNS('http://schemas.openxmlformats.org/drawingml/2006/main', 't')].map((x) => x.textContent).join('') : '';
+  return { type, title: title.trim(), labels, series: series.slice(0, 12) };
+}
+// r:id of each chart in word/document.xml -> config.
+async function readCharts(zip) {
+  const out = new Map();
+  const rels = await read(zip, 'word/_rels/document.xml.rels');
+  if (!rels) return out;
+  for (const r of rels.getElementsByTagName('Relationship')) {
+    if (!/\/chart$/.test(r.getAttribute('Type') || '')) continue;
+    const part = await read(zip, 'word/' + r.getAttribute('Target').replace(/^\/?(word\/)?/, '')).catch(() => null);
+    const cfg = part && chartConfig(part);
+    if (cfg) out.set(r.getAttribute('Id'), cfg);
+  }
+  return out;
+}
+
 // Rewrites the document XML in place and returns what the later steps need.
-function mark(doc, comments, notes, sects) {
+function mark(doc, comments, notes, sects, charts) {
   const refs = [];                       // note references in document order
   const active = new Set();
   const after = (host, text) => {        // a paragraph holding only a marker, placed right after `host`
@@ -114,6 +180,21 @@ function mark(doc, comments, notes, sects) {
       if (!sects[k + 1]) return;
       after(sp.parentNode.parentNode, `S|${enc(JSON.stringify(sectData(sects[k], sects[k + 1])))}`);
     });
+  }
+  // Charts: the chart becomes a paragraph of its own after the host paragraph, and the drawing goes.
+  if (charts && charts.size) {
+    for (const ch of [...doc.getElementsByTagNameNS(CNS, 'chart')]) {
+      const cfg = charts.get(ch.getAttributeNS(RNS, 'id') || ch.getAttribute('r:id'));
+      let host = null, top = null;
+      for (let n = ch.parentNode; n && n !== doc; n = n.parentNode) {
+        if (n.namespaceURI === W && n.localName === 'p' && !host) host = n;
+        if (n.localName === 'drawing' && !top) top = n;
+        if (n.localName === 'AlternateContent') top = n;
+      }
+      if (!cfg || !host || !top) continue;
+      after(host, `H|${enc(JSON.stringify(cfg))}`);
+      top.remove();
+    }
   }
   // Text boxes: take their text out of the drawing and put it in a paragraph of its own after the host paragraph.
   for (const tb of kids(doc.documentElement, 'txbxContent')) {
@@ -202,7 +283,7 @@ function mark(doc, comments, notes, sects) {
 // Turns the markers in mammoth's HTML back into elements.
 function unmark(html, comments, notes) {
   let prev;
-  html = html.replace(new RegExp(`<p>(${O}[SX]\\|[^${O}${M}${C}]*${M}${C})</p>`, 'g'), '$1');   // block markers must not sit inside a paragraph
+  html = html.replace(new RegExp(`<p>(${O}[SXH]\\|[^${O}${M}${C}]*${M}${C})</p>`, 'g'), '$1');   // block markers must not sit inside a paragraph
   const used = new Map();                // comment id -> first span emitted (so one comment keeps one id)
   do {
     prev = html;
@@ -219,6 +300,7 @@ function unmark(html, comments, notes) {
       }
       if (f[0] === 'S') return `<div class="page-break sect-break" contenteditable="false" data-sect="${esc(dec(f[1]))}"></div>`;
       if (f[0] === 'X') return `<div class="textbox"${Number(f[1]) > 40 ? ` style="width:${Math.min(Number(f[1]), 720)}px"` : ''}>${dec(f[2])}</div>`;
+      if (f[0] === 'H') return `<figure class="chart" data-chart="${esc(dec(f[1]))}" contenteditable="false"></figure>`;
       if (f[0] === 'N') {
         const kind = f[1], id = dec(f[2]);
         return `<sup class="${kind === 'f' ? 'fn' : 'en'}-ref" data-fn="${kind}${esc(id)}" contenteditable="false">1</sup>`;
@@ -288,7 +370,8 @@ export async function prepare(JSZip, arrayBuffer) {
     const notes = { f: await readNotes(zip, 'word/footnotes.xml', 'footnote'), e: await readNotes(zip, 'word/endnotes.xml', 'endnote') };
     const comments = await readComments(zip);
     const sects = await sectInfo(zip, docXml).catch(() => []);
-    const refs = mark(docXml, comments, notes, sects);
+    const charts = await readCharts(zip).catch(() => new Map());
+    const refs = mark(docXml, comments, notes, sects, charts);
     zip.file('word/document.xml', new XMLSerializer().serializeToString(docXml));
     const buffer = await zip.generateAsync({ type: 'arraybuffer' });
     const extra = {};
