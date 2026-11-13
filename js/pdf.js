@@ -2,6 +2,7 @@
 // placed where the browser drew it, in a standard PDF font (Helvetica, Times or Courier, stretched to the exact
 // width), with backgrounds, borders, list markers, pictures and links, and headings as bookmarks.
 import { geometry } from './pages.js';
+import { askPrintView, withPrintView } from './review.js';
 import { parseFont } from './pdffont.js';
 
 let api;
@@ -541,9 +542,11 @@ async function savePdf(embed) {
       try { source = await localFonts(); } catch { api.toast('Font access was not allowed. Saving with standard PDF fonts.'); }
     }
   }
+  const mode = await askPrintView();
+  if (!mode) return;
   api.toast('Building PDF…');
   try {
-    const r = await buildPdf({ source });
+    const r = await withPrintView(mode, () => buildPdf({ source }));
     api.download(r.blob, api.fileBase() + '.pdf');
     api.toast(`Saved a ${r.pages}-page PDF${r.lost ? `; ${r.lost} characters the PDF fonts lack were replaced with “?”` : ''}.`);
   } catch (e) {

@@ -143,3 +143,11 @@
 /* in-text page gap inserted by the layout engine so a paragraph can continue on the next page */
 .pg-gap,.pgs-gap{display:block;height:0;margin:0;padding:0;border:0;line-height:0;font-size:0;pointer-events:none;user-select:none}
 @media print{.pg-gap,.pgs-gap{display:none !important}}
+
+/* printing with tracked changes shown as final or as original (set by review.js while printing or saving a PDF) */
+.doc.pv-final del.tc, .doc.pv-original ins.tc { display: none; }
+.doc.pv-final ins.tc, .doc.pv-original del.tc { color: inherit; text-decoration: none; }
+.doc.pv-final span.fc, .doc.pv-original span.fc { border: 0; background: none; }
+.doc.pv-final ins.tc > :is(.chart,.smartart,.shape,.eq,.textbox,.wordart), .doc.pv-original del.tc > :is(.chart,.smartart,.shape,.eq,.textbox,.wordart) { outline: 0; opacity: 1; }
+.doc.pv-final blockquote[data-compare-note], .doc.pv-original blockquote[data-compare-note] { display: none; }
+.doc.pv-final :is(p,li,h1,h2,h3,h4,h5,h6):has(> del.tc:only-child), .doc.pv-original :is(p,li,h1,h2,h3,h4,h5,h6):has(> ins.tc:only-child) { display: none; }

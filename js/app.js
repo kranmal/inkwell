@@ -1162,7 +1162,7 @@ function run(cmd, val, el) {
     case 'zoomOut': zoomTo(prefs.zoom - 10); break;
     case 'zoom': zoomTo(Number(val) || 100); break;
     case 'zoomFit': prefs.zoomFit = true; zoomTo(fitZoom(), false); break;
-    case 'print': $('#backstage').hidden = true; window.print(); break;
+    case 'print': $('#backstage').hidden = true; reviewMod.askPrintView().then((m) => { if (m) return reviewMod.withPrintView(m, () => window.print()); }); break;
     case 'backstage': toggleBackstage(); break;
     case 'new': createDoc('Untitled document', ''); break;
     case 'open': $('#file-open').click(); break;

@@ -14,7 +14,7 @@ A word processor that runs entirely in the browser. Live at https://kranmal.gith
 - Spelling (UK and US English) and rule-based grammar checking, with a proofing score
 - **Accessibility checker** (Review tab): flags pictures without alt text (and lets you type it in place), charts without a title, skipped or empty headings, tables without a header row, vague link text, low colour contrast and runs of blank paragraphs
 - Find and replace, word count, read aloud, outline, focus mode, dark mode
-- Opens .docx, .html, .txt and .md; saves as .docx, .html, .txt, or a **PDF with selectable text** (or print to PDF)
+- Opens .docx, .html, .txt and .md; saves as .docx, .html, .txt, or a **PDF with selectable text** (or print to PDF). When a document has tracked changes (a Compare result, say), printing and saving a PDF ask whether to show the changes marked, as final (all accepted) or as original (all rejected); the document itself is not changed. Formatting-only changes and table looks are shown as they are in the final and original views
 - **References:** figure/table/equation captions, a table of figures (or tables, or equations) with page numbers, cross-references, an index built from marked entries, citations with a bibliography (APA, MLA, IEEE)
 - **Mailings:** mail merge from pasted CSV or spreadsheet data, or from a CSV, JSON or Excel file, with live preview and one-document-per-record printing
 - **Equations** (type `\frac{a}{b}`, `\sqrt{x}`, `x^2` and so on; saved as real Word equations), **WordArt** and **SmartArt** (process, cycle, hierarchy, list, pyramid)
