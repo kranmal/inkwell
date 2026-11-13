@@ -323,6 +323,26 @@ const tests = [
     if (diffHtml(cur, cur).changes) f.push('identical document reported changes');
     return { fail: f, info: JSON.stringify(r.stats) };
   } },
+  { name: 'Compare marks changed, added and removed charts, shapes and SmartArt, and changed links', async run() {
+    const { diffHtml } = await import('../js/compare.js?t=' + Date.now());
+    const ch = (v) => `<figure class="chart" data-chart='${JSON.stringify({ type: 'column', title: 'T', labels: ['a', 'b'], series: [{ name: 'S', values: v }] })}'></figure>`;
+    const sh = (c) => `<span class="shape shape-rect" style="width:80px;height:40px;background-color:${c}"></span>`;
+    const sa = (items) => `<figure class="smartart" data-sa='${JSON.stringify({ kind: 'process', items })}'></figure>`;
+    const old = `<p>Intro</p>${ch([1, 2])}<p>Mid ${sh('#2a78d6')} text</p>${ch([5, 6])}<p>See <a href="https://a.example/">the guide</a> and <a href="https://b.example/">the site</a> now.</p>${sa(['A', 'B'])}`;
+    const cur = `<p>Intro</p>${ch([1, 9])}<p>Mid ${sh('#eb6834')} text</p><p>See <a href="https://a.example/new">the guide</a> and the site now.</p>${ch([7, 8])}`;
+    const r = diffHtml(old, cur), f = [], box = document.createElement('div');
+    box.innerHTML = r.html;
+    const ins = box.querySelectorAll('ins.tc > .chart, ins.tc > .shape').length, del = box.querySelectorAll('del.tc > .chart, del.tc > .shape, del.tc > .smartart').length;
+    if (ins < 3) f.push('expected changed/added charts and shape marked inserted, got ' + ins);
+    if (del < 4) f.push('expected old versions and the removed SmartArt shown deleted, got ' + del);
+    if (!box.querySelector('del.tc > .smartart')) f.push('removed SmartArt not shown');
+    const fcs = [...box.querySelectorAll('span.fc')].map((x) => x.dataset.label + '<' + x.dataset.was);
+    if (fcs.length !== 2 || !fcs.every((x) => /^Link</.test(x))) f.push('expected 2 link changes, got ' + JSON.stringify(fcs));
+    if (!fcs.some((x) => /a\.example\/&quot;|a\.example\/"/.test(x))) f.push('old link address not kept for reject: ' + JSON.stringify(fcs));
+    const same = diffHtml(old, old);
+    if (same.changes || box.querySelector('x')) f.push('identical documents reported changes: ' + JSON.stringify(same.stats));
+    return { fail: f, info: JSON.stringify(r.stats) };
+  } },
   { name: 'PDF export has one page per layout page, real text, links and bookmarks', async run() {
     await load(`<h1>Heading one</h1><p>Visit <a href="https://example.com/x">our site</a> and <b>read</b> this.</p><p>${lorem(1200)}</p><h2>Second</h2><p>${lorem(300)}</p>`, 1);
     const pdf = await W.eval(`import('${new URL('../js/pdf.js', location.href).href}')`), pages = (await W.eval(`import('${new URL('../js/pages.js', location.href).href}')`)).count();

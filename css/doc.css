@@ -70,6 +70,8 @@
 .doc ins.tc { color: #1a7f4b; text-decoration: underline; text-decoration-color: #1a7f4b; background: none; }
 .doc span.fc { border-bottom: 2px dotted #b36b00; background: rgba(179,107,0,.08); }
 .doc del.tc { color: #c62f35; text-decoration: line-through; }
+.doc ins.tc > .chart, .doc ins.tc > .smartart, .doc ins.tc > .shape { outline: 2px solid #1a7f4b; outline-offset: 2px; }
+.doc del.tc > .chart, .doc del.tc > .smartart, .doc del.tc > .shape { outline: 2px dashed #c62f35; outline-offset: 2px; opacity: .55; }
 
 /* shapes, text boxes, charts */
 .doc .shape { display: inline-block; vertical-align: bottom; background-color: #2a78d6; max-width: 100%; user-select: none; }
