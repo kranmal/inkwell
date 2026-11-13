@@ -14,7 +14,7 @@ A word processor that runs entirely in the browser. Live at https://kranmal.gith
 - Spelling (UK and US English) and rule-based grammar checking, with a proofing score
 - Find and replace, word count, read aloud, outline, focus mode, dark mode
 - Opens .docx, .html, .txt and .md; saves as .docx, .html, .txt or PDF (print)
-- **References:** figure/table/equation captions, cross-references, an index built from marked entries, citations with a bibliography (APA, MLA, IEEE)
+- **References:** figure/table/equation captions, a table of figures (or tables, or equations) with page numbers, cross-references, an index built from marked entries, citations with a bibliography (APA, MLA, IEEE)
 - **Mailings:** mail merge from pasted CSV or spreadsheet data, or from a CSV, JSON or Excel file, with live preview and one-document-per-record printing
 - **Equations** (type `\frac{a}{b}`, `\sqrt{x}`, `x^2` and so on; saved as real Word equations), **WordArt** and **SmartArt** (process, cycle, hierarchy, list, pyramid)
 - **Sections** with their own header, footer, page-number restart, orientation and margins
@@ -39,7 +39,7 @@ A word processor that runs entirely in the browser. Live at https://kranmal.gith
 - Grammar checking is pattern-based (about 100 rules, including comma splices, long sentences and commonly confused words), so it catches common mistakes rather than everything.
 - Charts come in seven types (column, stacked column, bar, line, area, pie, doughnut) with up to 12 series. In Word export, charts become native Word charts with an embedded workbook, and shapes and text boxes become Word drawing objects; SmartArt is still a picture.
 - Word import (.docx) keeps text, styles, tables, pictures, footnotes, endnotes, comments, tracked changes, the first section's header and footer, each later section's own header, footer, orientation and page-number restart, and the text of text boxes (as plain Inkwell text boxes, without fill, border or position). A first-page header's text is not kept, only the "different first page" setting, and anchored text boxes become inline ones. Only checked on files Inkwell wrote, not on real Word files.
-- Word export writes headers, footers, footnotes, endnotes, comments, tracked changes and custom styles. Equations (OMML), section breaks with their own headers, repeated header rows and the protection flag are included, with SmartArt as a picture. Its XML is checked for well-formedness, but the output has not yet been opened in Microsoft Word itself.
+- In Word export a table of figures is written as plain text with page numbers (not a Word field, so it does not refresh in Word). Word export writes headers, footers, footnotes, endnotes, comments, tracked changes and custom styles. Equations (OMML), section breaks with their own headers, repeated header rows and the protection flag are included, with SmartArt as a picture. Its XML is checked for well-formedness, but the output has not yet been opened in Microsoft Word itself.
 
 ## Run locally
 

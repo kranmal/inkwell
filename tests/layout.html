@@ -158,6 +158,17 @@ const tests = [
     if (tail.top < bx.bottom - 1 && Math.abs(tail.left - bx.left) < bx.width) f.push('tail paragraph overlaps the text box');
     return { fail: f, info: `box ${Math.round(bx.height)}px, row ${Math.round(rw.height)}px` };
   } })),
+  { name: 'Table of figures lists captions with page numbers', async run() {
+    const cap = (k, x) => `<p class="caption"><span class="cap-num" data-cap="${k}" contenteditable="false">${k} 1</span>: ${x}</p>`;
+    await load(`<h1>Intro</h1><div class="toc" data-kind="Figure"></div>${cap('Figure', 'Sales')}<p>${lorem(1500)}</p>${cap('Table', 'Costs')}${cap('Figure', 'Growth')}<p>end</p>`, 1);
+    const rows = [...ed.querySelectorAll('.toc [data-i]')].map((r) => r.textContent), f = [];
+    if (rows.length !== 2) f.push('expected 2 rows, got ' + rows.length);
+    else {
+      if (!/^Figure 1: Sales1$/.test(rows[0])) f.push('row 1: ' + rows[0]);
+      if (!/^Figure 2: Growth(\d+)$/.test(rows[1]) || Number(rows[1].match(/(\d+)$/)[1]) < 2) f.push('row 2: ' + rows[1]);
+    }
+    return { fail: f, info: rows.join(' | ') };
+  } },
   { name: 'Back to 1 column removes every temporary wrapper', async run() {
     await load(longText(), 2); await setCols(1);
     const n = ed.querySelectorAll('.pgs-part').length;

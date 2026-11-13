@@ -391,7 +391,7 @@ export async function exportDocx(root, { title = 'Document', page, hf = null, st
 
   function toc(el) {
     const rows = [...el.querySelectorAll('[data-i]')];
-    const titleEl = el.querySelector('.toc-title');
+    const titleEl = el.querySelector('.toc-title'), isFig = !!el.dataset.kind;
     let out = `<w:p><w:pPr><w:keepNext/><w:spacing w:before="240" w:after="120"/></w:pPr>${textRun(titleEl ? titleEl.textContent : 'Contents', { b: true, size: 14 })}</w:p>`;
     if (!rows.length) return out;
     const fld = (k) => `<w:r><w:fldChar w:fldCharType="${k}"/></w:r>`;
@@ -399,9 +399,9 @@ export async function exportDocx(root, { title = 'Document', page, hf = null, st
       const lvl = Number(row.className.slice(-1)) || 1;
       const t = row.querySelector('.toc-t'), pg = row.querySelector('.toc-pg');
       out += `<w:p><w:pPr><w:tabs><w:tab w:val="right" w:leader="dot" w:pos="${contentTw}"/></w:tabs><w:spacing w:after="60"/><w:ind w:left="${(lvl - 1) * 280}"/></w:pPr>`
-        + (i === 0 ? fld('begin') + '<w:r><w:instrText xml:space="preserve"> TOC \\o "1-3" \\h \\z \\u </w:instrText></w:r>' + fld('separate') : '')
+        + (i === 0 && !isFig ? fld('begin') + '<w:r><w:instrText xml:space="preserve"> TOC \\o "1-3" \\h \\z \\u </w:instrText></w:r>' + fld('separate') : '')
         + textRun((t || row).textContent, {}) + '<w:r><w:tab/></w:r>' + textRun(pg ? pg.textContent : '', {})
-        + (i === rows.length - 1 ? fld('end') : '') + '</w:p>';
+        + (i === rows.length - 1 && !isFig ? fld('end') : '') + '</w:p>';
     });
     return out;
   }

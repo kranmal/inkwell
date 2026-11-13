@@ -68,39 +68,59 @@ function insertNote(kind) {
   api.done();
 }
 
-// ---------- table of contents ----------
+// ---------- table of contents and table of figures ----------
+// Both are a div.toc. A table of figures also carries data-kind (Figure, Table or Equation) and lists that kind of caption.
 const heads = () => [...api.editor.querySelectorAll('h1,h2,h3')].filter((h) => h.textContent.trim() && !h.closest('.toc'));
-function fill(toc, hs) {
-  toc.innerHTML = '<p class="toc-title">Contents</p>' + (hs.length
-    ? hs.map((h, i) => `<p class="toc-${h.tagName[1]}" data-i="${i}"><span class="toc-t">${api.esc(h.textContent.trim())}</span><span class="toc-pg"></span></p>`).join('')
-    : '<p class="toc-empty">Headings you add to the document are listed here.</p>');
+const capsOf = (kind) => [...api.editor.querySelectorAll('span.cap-num')].filter((n) => (n.dataset.cap || 'Figure') === kind && !n.closest('.toc'));
+function capText(n, i) {
+  const rest = (n.parentElement ? n.parentElement.textContent : '').replace(n.textContent, '').replace(/^[:\s]+/, '').trim();
+  return `${n.dataset.cap || 'Figure'} ${i + 1}` + (rest ? ': ' + rest : '');
+}
+// Entries a list shows: the element each row points at, its level and its text.
+function entries(toc) {
+  const kind = toc.dataset.kind;
+  if (!kind) return heads().map((h) => ({ el: h, lvl: h.tagName[1], text: h.textContent.trim() }));
+  return capsOf(kind).map((n, i) => ({ el: n.closest('p,div') || n, lvl: '1', text: capText(n, i) }));
+}
+const titleOf = (toc) => (toc.dataset.kind ? `Table of ${toc.dataset.kind}s` : 'Contents');
+function fill(toc, es) {
+  toc.innerHTML = `<p class="toc-title">${titleOf(toc)}</p>` + (es.length
+    ? es.map((e, i) => `<p class="toc-${e.lvl}" data-i="${i}"><span class="toc-t">${api.esc(e.text)}</span><span class="toc-pg"></span></p>`).join('')
+    : `<p class="toc-empty">${toc.dataset.kind ? 'Captions you add are listed here.' : 'Headings you add to the document are listed here.'}</p>`);
 }
 function syncToc() {
   const tocs = api.editor.querySelectorAll('.toc');
-  if (!tocs.length) return;
-  const hs = heads();
-  const want = hs.map((h) => h.tagName[1] + '|' + h.textContent.trim()).join('\n');
   for (const toc of tocs) {
+    const es = entries(toc);
+    const want = es.map((e) => e.lvl + '|' + e.text).join('\n');
     const have = [...toc.querySelectorAll('[data-i]')].map((p) => p.className.slice(-1) + '|' + (p.querySelector('.toc-t') || p).textContent).join('\n');
-    if (have !== want || !toc.firstElementChild || (!hs.length && !toc.querySelector('.toc-empty'))) fill(toc, hs);
+    const title = toc.querySelector('.toc-title');
+    if (have !== want || !toc.firstElementChild || !title || title.textContent !== titleOf(toc) || (!es.length && !toc.querySelector('.toc-empty'))) fill(toc, es);
     if (toc.getAttribute('contenteditable') !== 'false') toc.setAttribute('contenteditable', 'false');
   }
 }
 function tocPages() {
-  const tocs = api.editor.querySelectorAll('.toc');
-  if (!tocs.length) return;
-  const hs = heads();
-  const nums = hs.map((h) => String(pageAt(h.getBoundingClientRect().top + 1)));
-  for (const toc of tocs) toc.querySelectorAll('[data-i]').forEach((p) => {
-    const pg = p.querySelector('.toc-pg'), n = nums[Number(p.dataset.i)];
-    if (pg && n && pg.textContent !== n) pg.textContent = n;
-  });
+  for (const toc of api.editor.querySelectorAll('.toc')) {
+    const nums = entries(toc).map((e) => String(pageAt(e.el.getBoundingClientRect().top + 1)));
+    toc.querySelectorAll('[data-i]').forEach((p) => {
+      const pg = p.querySelector('.toc-pg'), n = nums[Number(p.dataset.i)];
+      if (pg && n && pg.textContent !== n) pg.textContent = n;
+    });
+  }
 }
-function insertToc() {
+async function insertToc(kind) {
+  if (kind === 'ask') {
+    const v = await api.ask('Table of figures', [
+      { id: 'k', label: 'List', type: 'select', options: [['Figure', 'Figures'], ['Table', 'Tables'], ['Equation', 'Equations']] },
+    ], { ok: 'Insert', note: 'It lists every caption of that kind, with page numbers, and updates by itself.' });
+    if (!v) return;
+    kind = v.k;
+  }
   api.restore();
   const toc = document.createElement('div');
   toc.className = 'toc'; toc.setAttribute('contenteditable', 'false');
-  fill(toc, heads());
+  if (kind === 'Figure' || kind === 'Table' || kind === 'Equation') toc.dataset.kind = kind;
+  fill(toc, entries(toc));
   api.caretIn(api.insertBlock(toc));
   api.done();
 }
@@ -110,7 +130,8 @@ export function init(a) {
   const { editor } = api;
   api.cmd('footnote', () => insertNote('fn'));
   api.cmd('endnote', () => insertNote('en'));
-  api.cmd('toc', insertToc);
+  api.cmd('toc', () => insertToc());
+  api.cmd('tof', () => insertToc('ask'));
   api.on('meta', () => { sync(); syncToc(); });
   api.on('afterLayout', tocPages);
   api.on('load', () => { sync(); syncToc(); });
@@ -135,7 +156,7 @@ export function init(a) {
     const toc = t.closest('.toc');
     if (!toc) return;
     const row = t.closest('[data-i]');
-    const h = row && heads()[Number(row.dataset.i)];
+    const h = row && entries(toc)[Number(row.dataset.i)]?.el;
     if (h) { api.caretIn(h); h.scrollIntoView({ block: 'start', behavior: 'smooth' }); return; }
     const r = document.createRange(); r.selectNode(toc);
     const s = getSelection(); s.removeAllRanges(); s.addRange(r);
