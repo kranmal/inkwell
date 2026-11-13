@@ -343,6 +343,44 @@ const tests = [
     if (same.changes || box.querySelector('x')) f.push('identical documents reported changes: ' + JSON.stringify(same.stats));
     return { fail: f, info: JSON.stringify(r.stats) };
   } },
+  { name: 'Accept all and Reject all on a Compare result give back the new and the old charts, shapes, SmartArt and links', async run() {
+    const { diffHtml } = await import('../js/compare.js?t=' + Date.now());
+    const ch = (v) => `<figure class="chart" data-chart='${JSON.stringify({ type: 'column', title: 'T', labels: ['a', 'b'], series: [{ name: 'S', values: v }] })}'></figure>`;
+    const sh = (c) => `<span class="shape shape-rect" style="width:80px;height:40px;background-color:${c}"></span>`;
+    const sa = (items) => `<figure class="smartart" data-sa='${JSON.stringify({ kind: 'process', items })}'></figure>`;
+    const old = `<p>Intro</p>${ch([1, 2])}<p>Mid ${sh('#2a78d6')} text</p>${ch([5, 6])}<p>See <a href="https://a.example/">the guide</a> and <a href="https://b.example/">the site</a> now.</p>${sa(['A', 'B'])}`;
+    const cur = `<p>Intro</p>${ch([1, 9])}<p>Mid ${sh('#eb6834')} text</p><p>See <a href="https://a.example/new">the guide</a> and the site now.</p>${ch([7, 8])}`;
+    const marked = diffHtml(old, cur).html, f = [];
+    const sum = (html) => {
+      const b = document.createElement('div'); b.innerHTML = html;
+      return {
+        charts: [...b.querySelectorAll('.chart')].map((e) => JSON.parse(e.dataset.chart).series[0].values.join(',')),
+        shapes: [...b.querySelectorAll('.shape')].map((e) => e.style.backgroundColor),
+        smart: b.querySelectorAll('.smartart').length,
+        links: [...b.querySelectorAll('a')].map((e) => e.getAttribute('href') + ':' + e.textContent),
+        marks: b.querySelectorAll('ins.tc,del.tc,span.fc').length,
+        text: (b.querySelectorAll('.chart,.smartart,.shape').forEach((e) => e.remove()), b.textContent.replace(/\s+/g, ' ').trim()),
+      };
+    };
+    const run = async (cmd) => {
+      await load(marked);
+      D.querySelector(`[data-cmd="${cmd}"]`).click();
+      await sleep(300);
+      return sum(ed.innerHTML);
+    };
+    const acc = await run('acceptAll'), rej = await run('rejectAll');
+    const want = (name, got, exp) => { if (JSON.stringify(got) !== JSON.stringify(exp)) f.push(name + ': got ' + JSON.stringify(got) + ', expected ' + JSON.stringify(exp)); };
+    const n = sum(cur), o = sum(old);
+    for (const [label, got, exp] of [['accept', acc, n], ['reject', rej, o]]) {
+      if (got.marks) f.push(label + ' left ' + got.marks + ' tracked marks');
+      want(label + ' charts', got.charts, exp.charts);
+      want(label + ' shapes', got.shapes, exp.shapes);
+      want(label + ' SmartArt', got.smart, exp.smart);
+      want(label + ' links', got.links, exp.links);
+      want(label + ' text', got.text, exp.text);
+    }
+    return { fail: f, info: `accepted ${acc.charts.length} charts, rejected ${rej.charts.length} charts` };
+  } },
   { name: 'PDF export has one page per layout page, real text, links and bookmarks', async run() {
     await load(`<h1>Heading one</h1><p>Visit <a href="https://example.com/x">our site</a> and <b>read</b> this.</p><p>${lorem(1200)}</p><h2>Second</h2><p>${lorem(300)}</p>`, 1);
     const pdf = await W.eval(`import('${new URL('../js/pdf.js', location.href).href}')`), pages = (await W.eval(`import('${new URL('../js/pages.js', location.href).href}')`)).count();
