@@ -558,7 +558,13 @@
       <label class="field grow"><span>Category axis title</span><input id="ch-cat" type="text" autocomplete="off" maxlength="60"></label>
       <label class="field grow"><span>Value axis title</span><input id="ch-val" type="text" autocomplete="off" maxlength="60"></label>
     </div>
+    <div class="field-row">
+      <label class="field grow"><span>Value axis minimum</span><input id="ch-min" type="text" inputmode="decimal" autocomplete="off" placeholder="Automatic"></label>
+      <label class="field grow"><span>Value axis maximum</span><input id="ch-max" type="text" inputmode="decimal" autocomplete="off" placeholder="Automatic"></label>
+      <label class="field grow"><span>Number format</span><input id="ch-fmt" type="text" autocomplete="off" maxlength="30" placeholder="General, e.g. $#,##0 or 0.0%"></label>
+    </div>
     <label class="check"><input type="checkbox" id="ch-labels">Show data labels</label>
+    <label class="check"><input type="checkbox" id="ch-grid" checked>Show gridlines</label>
     <div class="field-row" id="ch-sec-row">
       <label class="check"><input type="checkbox" id="ch-sec">Plot the lines on a secondary value axis (right)</label>
       <label class="field grow"><span>Secondary axis title</span><input id="ch-sectitle" type="text" autocomplete="off" maxlength="60"></label>

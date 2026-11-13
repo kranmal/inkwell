@@ -1070,6 +1070,51 @@ const tests = [
     if (!/>100</.test(renderChart(got[1]))) f.push('axis top of 100 not drawn');
     return { fail: f, info: 'ok' };
   } },
+  { name: 'Chart gridlines and number formats survive a Word round trip', async run() {
+    const { exportDocx, loadScript } = await import('../js/docx.js?t=' + Date.now());
+    const { prepare } = await import('../js/docximport.js?t=' + Date.now());
+    const { renderChart } = await import('../js/objects.js?t=' + Date.now());
+    const cfgs = [
+      { type: 'column', title: 'C', labels: ['a', 'b'], series: [{ name: 'S1', values: [1000, 3000] }], grid: false, numFmt: '$#,##0' },
+      { type: 'line', title: 'L', labels: ['a', 'b'], series: [{ name: 'S1', values: [0.2, 0.8] }], numFmt: '0.0%' },
+      { type: 'column', title: 'D', labels: ['a', 'b'], series: [{ name: 'S1', values: [1, 3] }] }];
+    const root = document.createElement('div');
+    root.innerHTML = cfgs.map((c) => `<figure class="chart" data-chart='${JSON.stringify(c)}'></figure>`).join('');
+    const JSZip = await loadScript('../vendor/jszip.min.js', 'JSZip'), mammoth = await loadScript('../vendor/mammoth.browser.min.js', 'mammoth');
+    const blob = await exportDocx(root, { title: 't', page: { w: 210, h: 297, m: { t: 25, r: 25, b: 25, l: 25 } } });
+    const rich = await prepare(JSZip, await blob.arrayBuffer());
+    const box = document.createElement('div');
+    box.innerHTML = rich.finish((await mammoth.convertToHtml({ arrayBuffer: rich.buffer })).value);
+    const got = [...box.querySelectorAll('figure.chart')].map((x) => JSON.parse(x.dataset.chart)), f = [];
+    if (got.length !== 3) return { fail: ['expected 3 charts, got ' + got.length] };
+    if (got[0].grid !== false || got[0].numFmt !== '$#,##0') f.push('column: ' + JSON.stringify(got[0]));
+    if (got[1].grid !== undefined || got[1].numFmt !== '0.0%') f.push('line: ' + JSON.stringify(got[1]));
+    if (got[2].grid !== undefined || got[2].numFmt !== undefined) f.push('default chart gained settings: ' + JSON.stringify(got[2]));
+    const svg0 = renderChart(got[0]), svg1 = renderChart(got[1]);
+    if (!/\$3,000|\$2,000/.test(svg0)) f.push('currency axis labels not drawn');
+    if (/stroke="#e6e6e6"/.test(svg0)) f.push('gridlines still drawn');
+    if (!/80\.0%/.test(svg1)) f.push('percent labels not drawn');
+    return { fail: f, info: 'ok' };
+  } },
+  { name: 'Balanced columns survive a Word round trip without adding a section break', async run() {
+    const { exportDocx, loadScript } = await import('../js/docx.js?t=' + Date.now());
+    const { prepare } = await import('../js/docximport.js?t=' + Date.now());
+    const JSZip = await loadScript('../vendor/jszip.min.js', 'JSZip');
+    const f = [], out = {};
+    for (const balance of [false, true]) {
+      const root = document.createElement('div');
+      root.innerHTML = '<p>One</p><p>Two</p><p>Three</p>';
+      const blob = await exportDocx(root, { title: 't', page: { w: 210, h: 297, m: { t: 25, r: 25, b: 25, l: 25 }, cols: 2, balance } });
+      const buf = await blob.arrayBuffer();
+      const xml = await (await JSZip.loadAsync(buf)).file('word/document.xml').async('string');
+      const rich = await prepare(JSZip, buf);
+      out[balance] = { cont: /<w:type w:val="continuous"\/>/.test(xml), page: rich.extra.page, breaks: (rich.finish('').match(/sect-break/g) || []).length };
+    }
+    if (out.false.cont || !out.true.cont) f.push('continuous section only when balancing: ' + JSON.stringify(out));
+    if (!out.false.page || out.false.page.cols !== 2 || out.false.page.balance) f.push('plain columns import: ' + JSON.stringify(out.false.page));
+    if (!out.true.page || out.true.page.cols !== 2 || out.true.page.balance !== true) f.push('balanced import: ' + JSON.stringify(out.true.page));
+    return { fail: f, info: JSON.stringify(out) };
+  } },
   { name: 'Balancing the last page evens out its columns, and is off by default', async run() {
     const f = [];
     const paras = Array.from({ length: 34 }, (_, i) => `<p>Paragraph ${i + 1}. The quick brown fox jumps over the lazy dog and keeps running across the field until the end.</p>`).join('');

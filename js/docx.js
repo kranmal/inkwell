@@ -621,7 +621,14 @@ export async function exportDocx(root, { title = 'Document', page, hf = null, st
   };
   let bodyXml = body;
   breaks.forEach((d, i) => { bodyXml = bodyXml.replace(`%%SB${i}%%`, sectPr(secDefs[i], i === 0)); });
-  const sect = sectPr(secDefs[secDefs.length - 1], secDefs.length === 1).replace('<w:type w:val="nextPage"/>', '');
+  let sect = sectPr(secDefs[secDefs.length - 1], secDefs.length === 1).replace('<w:type w:val="nextPage"/>', '');
+  // Word balances a section's columns only when the next section starts continuously, so a balanced document ends its
+  // columns with an empty paragraph carrying their section properties, and finishes in a one-column continuous section.
+  if (page.balance && (page.cols || 1) > 1) {
+    bodyXml += `<w:p><w:pPr><w:spacing w:before="0" w:after="0"/>${sect}</w:pPr></w:p>`;
+    sect = sect.replace(/<w:cols [^>]*\/>/, '<w:cols w:num="1" w:space="708"/>').replace(/<w:pgNumType [^>]*\/>/, '').replace('<w:titlePg/>', '')
+      .replace(/^(<w:sectPr>(?:<w:(?:header|footer)Reference [^>]*\/>)*)/, '$1<w:type w:val="continuous"/>');
+  }
   if (footnotesXml) rel(RT + 'footnotes', 'footnotes.xml');
   if (endnotesXml) rel(RT + 'endnotes', 'endnotes.xml');
   if (commentsXml) rel(RT + 'comments', 'comments.xml');
