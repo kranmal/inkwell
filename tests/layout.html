@@ -186,6 +186,22 @@ const tests = [
     if (same.changes || same.html.indexOf('class="tc"') >= 0) f.push('identical documents reported changes');
     return { fail: f, info: JSON.stringify(r.stats) };
   } },
+  { name: 'Word charts survive an export and re-import as editable charts', async run() {
+    const { exportDocx, loadScript } = await import('../js/docx.js?t=' + Date.now());
+    const { prepare } = await import('../js/docximport.js?t=' + Date.now());
+    const cfgs = ['column', 'stacked', 'bar', 'line', 'area', 'combo', 'scatter', 'radar', 'pie', 'donut'].map((type, i) => ({ type, title: 'T' + i, labels: type === 'scatter' ? ['1', '2.5', '4'] : ['a', 'b', 'c'], series: [{ name: 'S1', values: [1, 3, 2.5] }, ...(type === 'pie' || type === 'donut' ? [] : [{ name: 'S2', values: [2, 2, 4] }])] }));
+    const root = document.createElement('div');
+    root.innerHTML = '<p>Hello</p>' + cfgs.map((c) => `<figure class="chart" data-chart='${JSON.stringify(c)}'></figure>`).join('') + '<p>End</p>';
+    const JSZip = await loadScript('../vendor/jszip.min.js', 'JSZip'), mammoth = await loadScript('../vendor/mammoth.browser.min.js', 'mammoth');
+    const blob = await exportDocx(root, { title: 't', page: { w: 210, h: 297, m: { t: 25, r: 25, b: 25, l: 25 } } });
+    const rich = await prepare(JSZip, await blob.arrayBuffer());
+    const box = document.createElement('div');
+    box.innerHTML = rich.finish((await mammoth.convertToHtml({ arrayBuffer: rich.buffer })).value);
+    const got = [...box.querySelectorAll('figure.chart')].map((x) => JSON.parse(x.dataset.chart)), f = [];
+    if (got.length !== cfgs.length) f.push(`expected ${cfgs.length} charts, got ${got.length}`);
+    cfgs.forEach((c, i) => { if (JSON.stringify(c) !== JSON.stringify(got[i])) f.push(`${c.type} changed: ${JSON.stringify(got[i])}`); });
+    return { fail: f, info: got.length + ' charts' };
+  } },
   { name: 'Compare marks removed table rows and cells, and added, removed and replaced pictures', async run() {
     const { diffHtml } = await import('../js/compare.js?t=' + Date.now());
     const I = (c) => `<img src="data:image/png;base64,${c}" alt="">`, A = I('AAAA'), B = I('BBBB'), C = I('CCCC');
