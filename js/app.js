@@ -25,6 +25,7 @@ import * as extrasMod from './extras.js';
 import * as tablexMod from './tablex.js';
 import * as docsMod from './docs.js';
 import * as compareMod from './compare.js';
+import * as pdfMod from './pdf.js';
 import * as toolsMod from './tools.js';
 
 const $ = (s, r = document) => r.querySelector(s);
@@ -1455,7 +1456,7 @@ const api = {
 };
 
 async function start() {
-  for (const m of [pagesMod, tablesMod, refsMod, reviewMod, objectsMod, stylesMod, citeMod, extrasMod, tablexMod, docsMod, compareMod, toolsMod]) m.init(api);
+  for (const m of [pagesMod, tablesMod, refsMod, reviewMod, objectsMod, stylesMod, citeMod, extrasMod, tablexMod, docsMod, compareMod, pdfMod, toolsMod]) m.init(api);
   buildUI();
   applyDark(); applyLang();
   document.execCommand('defaultParagraphSeparator', false, 'p');
