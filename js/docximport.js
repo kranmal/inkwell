@@ -341,7 +341,7 @@ function mark(doc, comments, notes, sects, charts, smart) {
     if (was === now && wasB === nowB && wasCs === spanOf(pr) && wasV === vOf(pr)) continue;
     const t = firstText(tc);
     if (!t) continue;
-    t.textContent = `${O}K|${enc(attr(ch, 'author'))}|${Date.parse(attr(ch, 'date')) || Date.now()}|${enc(was)}|${enc(now)}|${enc(wasB)}|${enc(nowB)}|${wasCs}|${wasV}${M}${t.textContent}${C}`;
+    t.textContent = `${O}K|${enc(attr(ch, 'author'))}|${Date.parse(attr(ch, 'date')) || Date.now()}|${enc(was)}|${enc(now)}|${enc(wasB)}|${enc(nowB)}|${wasCs}|${wasV}|${wasCs !== spanOf(pr) || !!wasV !== !!vOf(pr) ? 1 : 0}${M}${t.textContent}${C}`;
   }
   const walk = (el) => {
     for (const n of [...el.childNodes]) {
@@ -455,7 +455,7 @@ function unmark(html, comments, notes) {
       if (f[0] === 'L') return `<span data-look="1" data-new-bg="${esc(dec(f[1]))}" data-new-border="${esc(dec(f[2]))}"${body === '\u200b' ? ' data-pad="1"' : ''}>${body}</span>`;
       if (f[0] === 'K') {       // a tracked cell change: the old look goes in the mark, the new one is applied to the cell in finish()
         const wasFill = dec(f[3]), wasB = dec(f[5]), fillDiff = wasFill !== dec(f[4]), bordDiff = wasB !== dec(f[6]);
-        const label = [fillDiff && 'shading', bordDiff && 'borders'].filter(Boolean).join(', ') || 'merged or split';
+        const label = [fillDiff && 'shading', bordDiff && 'borders', f[9] === '1' && 'merged or split'].filter(Boolean).join(', ') || 'merged or split';
         const style = (wasFill ? `background-color: #${wasFill};` : '') + wasB;
         return `<span class="fc" data-author="${esc(dec(f[1]))}" data-time="${esc(f[2])}" data-label="Cell ${label}"${fillDiff || bordDiff ? ` data-cell-style="${esc(style)}"` : ''} data-new-bg="${esc(dec(f[4]))}" data-new-border="${esc(dec(f[6]))}" data-old-cs="${esc(f[7])}" data-old-v="${esc(f[8])}"${body === '\u200b' ? ' data-pad="1"' : ''}>${body}</span>`;
       }
