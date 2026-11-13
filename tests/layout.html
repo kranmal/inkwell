@@ -706,6 +706,35 @@ const tests = [
     await setHf({ header: '', footer: '', num: 'none' });
     return { fail: f, info: zones() };
   } },
+  { name: 'Compare can set any two documents against each other, and the dialog offers two pickers', async run() {
+    const { diffSides } = await import('../js/compare.js?t=' + Date.now());
+    const f = [];
+    const v1 = { html: '<p>The cat sat.</p>', hf: { header: 'Draft' } };
+    const v2 = { html: '<p>The cat sat on the mat.</p>', hf: { header: 'Final' } };
+    const r = diffSides(v1, v2);
+    if (!/<ins[^>]*>[^<]*mat/.test(r.res.html)) f.push('added words not marked: ' + r.res.html.slice(0, 200));
+    if (!r.pg.length || !/data-compare-note/.test(r.res.html)) f.push('header change not listed');
+    const back = diffSides(v2, v1);
+    if (!/<del[^>]*>[^<]*mat/.test(back.res.html)) f.push('swapped sides did not read as a removal');
+    const same = diffSides(v1, v1);
+    if (same.res.changes || same.pg.length) f.push('identical sides reported differences');
+    await load('<p>Body</p>');
+    D.querySelector('[data-cmd="compare"]').click();
+    await sleep(400);
+    const dlg = [...D.querySelectorAll('dialog')].find((d) => d.querySelector('#cp-base'));
+    if (!dlg) f.push('the Compare dialog did not open');
+    else {
+      if (!dlg.querySelector('#cp-rev')) f.push('no second picker');
+      const base = dlg.querySelector('#cp-base');
+      if (![...base.options].some((o) => o.value === 'file')) f.push('no file option');
+      if (dlg.querySelector('#cp-rev').options[0].value !== 'cur') f.push('revised does not start with this document');
+      base.value = 'file'; base.dispatchEvent(new Event('change', { bubbles: true }));
+      if (dlg.querySelector('#cp-fwrap').hidden) f.push('file input stays hidden when A file is chosen');
+      dlg.querySelector('button[value="cancel"]').click();
+      await sleep(100);
+    }
+    return { fail: f };
+  } },
   { name: 'PDF export has one page per layout page, real text, links and bookmarks', async run() {
     await load(`<h1>Heading one</h1><p>Visit <a href="https://example.com/x">our site</a> and <b>read</b> this.</p><p>${lorem(1200)}</p><h2>Second</h2><p>${lorem(300)}</p>`, 1);
     const pdf = await W.eval(`import('${new URL('../js/pdf.js', location.href).href}')`), pages = (await W.eval(`import('${new URL('../js/pages.js', location.href).href}')`)).count();

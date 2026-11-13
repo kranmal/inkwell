@@ -516,46 +516,82 @@ const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&l
 
 const when = (ts) => new Date(ts).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 
+// Compares two documents, each { html, hf }: the original and the revised one. Returns the result's HTML (with the
+// header and footer note on top) and what differs.
+export function diffSides(base, rev) {
+  const res = diffHtml(base.html, rev.html);
+  const pg = diffPage(base.hf, rev.hf, base.html, rev.html);
+  if (pg.length) res.html = hfNote(pg) + res.html;
+  return { res, pg };
+}
+
 async function compare() {
   api.toggleBackstage(false);
   await api.flush();
   let versions = [];
   try { versions = await versionsOf(api.doc.id); } catch { /* storage blocked: files only */ }
+  const name = (v) => `${v.name || (v.auto ? 'Auto-saved' : 'Saved')} · ${when(v.ts)}${v.words ? ` · ${v.words} ${v.words === 1 ? 'word' : 'words'}` : ''}`;
+  const vopts = versions.map((v) => `<option value="v:${api.esc(v.vid)}">${api.esc(name(v))}</option>`).join('');
   const dlg = document.createElement('dialog');
   dlg.className = 'dlg';
-  dlg.innerHTML = `<form method="dialog"><h2>Compare documents</h2><p class="dlg-note">Compares this document with an earlier version or another file and opens the result as a new document. Every difference is a tracked change you can accept or reject. This document is not changed.</p>
-    <label class="field"><span>Earlier version of this document</span><select id="cp-ver">${versions.length ? versions.map((v) => `<option value="${api.esc(v.vid)}">${api.esc(v.name || (v.auto ? 'Auto-saved' : 'Saved'))} · ${api.esc(when(v.ts))}</option>`).join('') : '<option value="">No saved versions yet</option>'}</select></label>
-    <label class="field"><span>Or compare with a file (.docx, .html, .txt, .md)</span><input type="file" id="cp-file" accept=".docx,.html,.htm,.txt,.md"></label>
+  dlg.innerHTML = `<form method="dialog"><h2>Compare documents</h2><p class="dlg-note">Shows what changed from the original to the revised one, as tracked changes you can accept or reject, in a new document. Pick any two saved versions, a saved version and this document, or a file. Nothing you have is changed.</p>
+    <label class="field"><span>Original (the older one)</span><select id="cp-base">${vopts}<option value="file"${versions.length ? '' : ' selected'}>A file…</option></select></label>
+    <label class="field" id="cp-fwrap"${versions.length ? ' hidden' : ''}><span>File (.docx, .html, .txt, .md)</span><input type="file" id="cp-file" accept=".docx,.html,.htm,.txt,.md"></label>
+    <label class="field"><span>Revised (the newer one)</span><select id="cp-rev"><option value="cur">This document, as it is now</option>${vopts}</select></label>
+    <p class="dlg-note" id="cp-hint">${versions.length ? '' : 'There are no saved versions of this document yet (File → Version history saves one).'}</p>
     <div class="dlg-actions"><span class="spacer"></span><button class="btn" value="cancel" formnovalidate>Cancel</button><button class="btn primary" value="ok">Compare</button></div></form>`;
   document.body.append(dlg);
+  const $d = (sel) => dlg.querySelector(sel);
+  const sync = () => {
+    $d('#cp-fwrap').hidden = $d('#cp-base').value !== 'file';
+    const base = $d('#cp-base').value;
+    for (const o of $d('#cp-rev').options) o.disabled = o.value === base;           // a version cannot be compared with itself
+    if ($d('#cp-rev').selectedOptions[0].disabled) $d('#cp-rev').value = 'cur';
+    const b = versions.find((v) => 'v:' + v.vid === base), r = versions.find((v) => 'v:' + v.vid === $d('#cp-rev').value);
+    $d('#cp-hint').textContent = b && r && b.ts > r.ts ? 'The original is newer than the revised one, so the changes will read backwards. Swap them if that is not what you want.' : '';
+  };
+  dlg.addEventListener('change', sync);
+  sync();
   const pick = await new Promise((res) => {
     let out = null;
     dlg.querySelector('form').addEventListener('submit', (e) => {
       e.preventDefault();
-      if (!e.submitter || e.submitter.value === 'ok') out = { file: dlg.querySelector('#cp-file').files[0], vid: dlg.querySelector('#cp-ver').value };
+      if (!e.submitter || e.submitter.value === 'ok') out = { base: $d('#cp-base').value, rev: $d('#cp-rev').value, file: $d('#cp-file').files[0] };
       dlg.close();
     });
     dlg.addEventListener('close', () => { dlg.remove(); res(out); });
     dlg.showModal();
   });
   if (!pick) return;
-  let other, label, otherHf = null;
-  try {
-    if (pick.file) { const f = await api.fileToHtml(pick.file); other = f.html; label = pick.file.name; otherHf = (f.extra && f.extra.hf) || null; } else {
-      const v = versions.find((x) => x.vid === pick.vid);
-      if (!v) { api.toast('Choose a version or a file to compare with.'); return; }
-      other = v.html; label = (v.name || 'version') + ' ' + when(v.ts); otherHf = v.hf || null;
-    }
-  } catch { api.toast('Sorry, that file could not be read.'); return; }
-  let res;
-  try { res = diffHtml(other, api.editor.innerHTML); } catch { api.toast('These documents are too large to compare.'); return; }
   const d = api.doc;
-  const pg = diffPage(otherHf, d.hf, other, api.editor.innerHTML);
+  const keepOf = (x) => ({ page: x.page, theme: x.theme, hf: x.hf, styles: x.styles, themeCustom: x.themeCustom, x: x.x });
+  let base, rev, keep = keepOf(d), label;
+  try {
+    const side = async (id) => {
+      if (id === 'cur') return { html: api.editor.innerHTML, hf: d.hf || null, label: 'this document', keep: keepOf(d) };
+      if (id === 'file') {
+        if (!pick.file) throw new Error('nofile');
+        const f = await api.fileToHtml(pick.file);
+        return { html: f.html, hf: (f.extra && f.extra.hf) || null, label: pick.file.name, keep: null };
+      }
+      const v = versions.find((x) => 'v:' + x.vid === id);
+      if (!v) throw new Error('nover');
+      return { html: v.html, hf: v.hf || null, label: (v.name || 'version') + ' ' + when(v.ts), keep: keepOf(v) };
+    };
+    base = await side(pick.base); rev = await side(pick.rev);
+  } catch (e) {
+    api.toast(e.message === 'nofile' ? 'Choose a file to compare with.' : e.message === 'nover' ? 'Choose a version or a file to compare with.' : 'Sorry, that file could not be read.');
+    return;
+  }
+  if (rev.keep) keep = rev.keep;
+  label = pick.rev === 'cur' ? `Compared with ${base.label}` : `Compared ${base.label} with ${rev.label}`;
+  let out;
+  try { out = diffSides(base, rev); } catch { api.toast('These documents are too large to compare.'); return; }
+  const { res, pg } = out;
   if (!res.changes && !res.stats.unmarked && !pg.length) { api.toast('No differences found.'); return; }
-  if (pg.length) res.html = hfNote(pg) + res.html;
-  await api.createDoc(`Comparison: ${d.title || 'Untitled'}`, res.html, { page: d.page, theme: d.theme, hf: d.hf, styles: d.styles, themeCustom: d.themeCustom, x: d.x });
+  await api.createDoc(`Comparison: ${d.title || 'Untitled'}`, res.html, keep);
   const s = res.stats;
-  api.toast(`Compared with ${label}: ${s.added} added, ${s.removed} removed, ${s.edited} edited${s.formatted ? `, ${s.formatted} reformatted` : ''}${s.comments ? `, ${s.comments} ${s.comments === 1 ? 'comment' : 'comments'} different` : ''}${pg.length ? `, ${pg.length} header, footer or page-number ${pg.length === 1 ? 'setting' : 'settings'} different (listed at the top)` : ''}${s.unmarked ? `; ${s.unmarked} changes in tables or pictures are not marked` : ''}.`);
+  api.toast(`${label}: ${s.added} added, ${s.removed} removed, ${s.edited} edited${s.formatted ? `, ${s.formatted} reformatted` : ''}${s.comments ? `, ${s.comments} ${s.comments === 1 ? 'comment' : 'comments'} different` : ''}${pg.length ? `, ${pg.length} header, footer or page-number ${pg.length === 1 ? 'setting' : 'settings'} different (listed at the top)` : ''}${s.unmarked ? `; ${s.unmarked} changes in tables or pictures are not marked` : ''}.`);
 }
 
 export function init(a) {
