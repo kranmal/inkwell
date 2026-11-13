@@ -748,6 +748,43 @@ const tests = [
     if (pages < 2) f.push('test document did not span pages');
     return { fail: f, info: `${r.pages} pages, ${Math.round(r.blob.size / 1024)} KB` };
   } },
+  { name: 'Printing and PDF can show tracked changes marked, as final, or as original', async run() {
+    const mk = (t, id) => `data-author="Compare" data-time="1" data-id="${id}"`;
+    await load(`<p>Stay put <del class="tc" ${mk(0, 1)}>OLDWORDX</del><ins class="tc" ${mk(0, 2)}>NEWWORDX</ins> end.</p><p><del class="tc" ${mk(0, 3)}>GONEPARAX</del></p><p><ins class="tc" ${mk(0, 4)}>ADDEDPARAX</ins></p>`, 1);
+    const base = new URL('../js/', location.href).href;
+    const pdf = await W.eval(`import('${base}pdf.js')`), rev = await W.eval(`import('${base}review.js')`);
+    const f = [], out = {};
+    for (const m of ['markup', 'final', 'original']) {
+      const r = await rev.withPrintView(m, async () => {
+        const vis = (t) => [...ed.querySelectorAll('p,del,ins')].some((e) => e.textContent.includes(t) && e.getBoundingClientRect().height > 0 && getComputedStyle(e).display !== 'none' && e.children.length === 0);
+        out[m] = { old: vis('OLDWORDX'), neu: vis('NEWWORDX'), gone: vis('GONEPARAX'), added: vis('ADDEDPARAX') };
+        return pdf.buildPdf();
+      });
+      const bytes = new Uint8Array(await r.blob.arrayBuffer()), raw = new TextDecoder('latin1').decode(bytes);
+      let txt = raw;                                    // content streams are compressed: add each one, inflated
+      for (const mt of raw.matchAll(/stream\r?\n/g)) {
+        const a = mt.index + mt[0].length, e = raw.indexOf('endstream', a);
+        for (const b of [e, e - 1, e - 2]) {              // the stream may be followed by a line break
+          try {
+            const ds = new Response(new Blob([bytes.slice(a, b)]).stream().pipeThrough(new DecompressionStream('deflate')));
+            txt += '\n' + new TextDecoder('latin1').decode(new Uint8Array(await ds.arrayBuffer()));
+            break;
+          } catch { /* not a compressed stream, or a line break on its end */ }
+        }
+      }
+      const hex = (w) => [...w].map((c) => c.charCodeAt(0).toString(16).padStart(2, '0')).join('');
+      out[m].pdf = ['OLDWORDX', 'NEWWORDX', 'GONEPARAX', 'ADDEDPARAX'].map((w) => txt.includes(w) || txt.toLowerCase().includes(hex(w)) ? 1 : 0).join('');
+      out[m].dbg = txt.length > raw.length ? '' : 'no stream could be inflated';
+    }
+    const want = { markup: '1111', final: '0101', original: '1010' };
+    for (const m in want) if (out[m].pdf !== want[m]) f.push(`${m}: PDF text present (old,new,gone,added) = ${out[m].pdf}, expected ${want[m]} ${JSON.stringify(out[m].dbg)}`);
+    if (!out.markup.old || !out.markup.neu) f.push('markup view hides a change');
+    if (out.final.old || !out.final.neu) f.push('final view wrong: ' + JSON.stringify(out.final));
+    if (!out.original.old || out.original.neu) f.push('original view wrong: ' + JSON.stringify(out.original));
+    if (/pv-/.test(ed.className)) f.push('the print view class was left on the document');
+    if (!ed.querySelector('del.tc') || !ed.querySelector('ins.tc')) f.push('the document itself was changed');
+    return { fail: f, info: JSON.stringify(Object.fromEntries(Object.entries(out).map(([k, v]) => [k, v.pdf]))) };
+  } },
   { name: 'Back to 1 column removes every temporary wrapper', async run() {
     await load(longText(), 2); await setCols(1);
     const n = ed.querySelectorAll('.pgs-part').length;

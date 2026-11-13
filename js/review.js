@@ -1,5 +1,5 @@
 // Comments and track changes, with a review pane listing both.
-import { resetHf } from './pages.js';
+import { resetHf, layout } from './pages.js';
 let api;
 let pending = null;      // range waiting for a new comment
 let editing = null;      // comment id being edited
@@ -412,6 +412,38 @@ function render(force) {
       + `<div class="issue-fix"><button class="link-btn" data-act="accept">Accept</button><button class="link-btn" data-act="reject">Reject</button></div></div>`;
   }).join('');
   position();
+}
+
+// ---------- printing and PDF with tracked changes ----------
+// A document with tracked changes (a Compare result, say) can be printed or saved as PDF three ways: with the changes
+// marked, as it would read with every change accepted, or as it read before. This only changes how the page is drawn
+// while it is printed; the document itself is not touched. Resolves to 'markup', 'final', 'original', or null (cancelled).
+export function askPrintView() {
+  if (!api.editor.querySelector('ins.tc,del.tc')) return Promise.resolve('markup');
+  const dlg = document.createElement('dialog');
+  dlg.className = 'dlg';
+  dlg.innerHTML = `<form method="dialog"><h2>Print with changes</h2><p class="dlg-note">This document has tracked changes. Choose how they show on paper.</p>
+    <label class="field"><span><input type="radio" name="pv" value="markup" checked> With the changes marked</span></label>
+    <label class="field"><span><input type="radio" name="pv" value="final"> Final: every change accepted, no marks</span></label>
+    <label class="field"><span><input type="radio" name="pv" value="original"> Original: every change rejected, no marks</span></label>
+    <div class="dlg-actions"><span class="spacer"></span><button class="btn" value="cancel" formnovalidate>Cancel</button><button class="btn primary" value="ok">Continue</button></div></form>`;
+  document.body.append(dlg);
+  return new Promise((res) => {
+    let out = null;
+    dlg.querySelector('form').addEventListener('submit', (e) => {
+      e.preventDefault();
+      if (!e.submitter || e.submitter.value === 'ok') out = dlg.querySelector('input[name="pv"]:checked').value;
+      dlg.close();
+    });
+    dlg.addEventListener('close', () => { dlg.remove(); res(out); });
+    dlg.showModal();
+  });
+}
+
+export async function withPrintView(mode, fn) {
+  const cls = mode === 'final' || mode === 'original' ? 'pv-' + mode : '';
+  if (cls) { api.editor.classList.add(cls); layout(); }
+  try { return await fn(); } finally { if (cls) { api.editor.classList.remove(cls); layout(); } }
 }
 
 export function init(a) {
