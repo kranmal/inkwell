@@ -831,6 +831,35 @@ const tests = [
     if (seen.finalBold) f.push('the final view shows bold');
     return { fail: f, info: JSON.stringify(r.stats) };
   } },
+  { name: 'Tracked colour, size and font changes in a Word file import as formatting changes that Reject undoes', async run() {
+    const { exportDocx, loadScript } = await import('../js/docx.js?t=' + Date.now());
+    const { prepare } = await import('../js/docximport.js?t=' + Date.now());
+    const JSZip = await loadScript('../vendor/jszip.min.js', 'JSZip'), mammoth = await loadScript('../vendor/mammoth.browser.min.js', 'mammoth');
+    const blob = await exportDocx(Object.assign(document.createElement('div'), { innerHTML: '<p>Make <span class="fc" data-author="Sam" data-time="1" data-label="Bold" data-was="x">this</span> louder.</p>' }), { title: 't', page: { w: 210, h: 297, m: { t: 25, r: 25, b: 25, l: 25 } } });
+    const zip = await JSZip.loadAsync(await blob.arrayBuffer());
+    let xml = await zip.file('word/document.xml').async('string');
+    const f = [];
+    const m = xml.match(/<w:rPr>((?:(?!<w:rPr>)[\s\S])*?)<w:rPrChange ([^>]*)>([\s\S]*?)<\/w:rPrChange><\/w:rPr>/);
+    if (!m) return { fail: ['no tracked formatting change in the test file: ' + xml.slice(0, 400)] };
+    // new look: red, 16 pt, Arial (and no bold); old look: blue, 12 pt, no font
+    xml = xml.replace(m[0], `<w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:color w:val="FF0000"/><w:sz w:val="32"/><w:rPrChange ${m[2]}><w:rPr><w:color w:val="0000FF"/><w:sz w:val="24"/></w:rPr></w:rPrChange></w:rPr>`);
+    zip.file('word/document.xml', xml);
+    const buf = await zip.generateAsync({ type: 'arraybuffer' });
+    const rich = await prepare(JSZip, buf), box = document.createElement('div');
+    box.innerHTML = rich.finish((await mammoth.convertToHtml({ arrayBuffer: rich.buffer })).value);
+    const fc = box.querySelector('span.fc');
+    if (!fc) return { fail: ['the change did not come back: ' + box.innerHTML.slice(0, 400)] };
+    if (fc.dataset.label !== 'Colour, Size, Font') f.push('label was ' + fc.dataset.label);
+    const inner = fc.querySelector('span[style]');
+    if (!inner || !/color:\s*#ff0000/i.test(inner.getAttribute('style')) || !/16pt/.test(inner.getAttribute('style')) || !/Arial/.test(inner.getAttribute('style'))) f.push('new look missing: ' + fc.outerHTML);
+    if (!/#0000ff/.test(fc.dataset.was) || !/12pt/.test(fc.dataset.was) || /Arial/.test(fc.dataset.was)) f.push('old look wrong: ' + fc.dataset.was);
+    await load(box.innerHTML);
+    D.querySelector('[data-cmd="rejectAll"]').click();
+    await sleep(250);
+    const p = ed.querySelector('p');
+    if (!p || !/Make this louder/.test(p.textContent) || /ff0000|Arial/i.test(ed.innerHTML) || !/#0000ff|0000ff|rgb\(0, 0, 255\)/i.test(ed.innerHTML)) f.push('reject did not restore the old look: ' + ed.innerHTML.slice(0, 300));
+    return { fail: f, info: fc.dataset.label };
+  } },
   { name: 'Back to 1 column removes every temporary wrapper', async run() {
     await load(longText(), 2); await setCols(1);
     const n = ed.querySelectorAll('.pgs-part').length;

@@ -338,24 +338,32 @@ function mark(doc, comments, notes, sects, charts, smart) {
 }
 
 // A run's tracked formatting change (w:rPrChange) as a marker: who, when, what changed, and the tags the text had before.
-// Only the looks the import keeps are compared: bold, italic, underline, strikethrough, super/subscript.
+// Compared: bold, italic, underline, strikethrough, super/subscript, colour, size and font.
 const LOOKS = [['b', 'Bold', 'strong'], ['i', 'Italic', 'em'], ['u', 'Underline', 'u'], ['strike', 'Strikethrough', 's']];
 function looksOf(rPr) {
   const own = (name) => [...rPr.children].filter((c) => c.namespaceURI === W && c.localName === name);
   const on = (name) => { const e = own(name)[0]; if (!e) return false; const v = attr(e, 'val'); return !(v === '0' || v === 'false' || v === 'none'); };
   const va = own('vertAlign')[0];
-  return { b: on('b'), i: on('i'), u: on('u'), strike: on('strike') || on('dstrike'), va: va ? attr(va, 'val') : '' };
+  const val = (name, key = 'val') => { const e = own(name)[0]; return e ? attr(e, key) : ''; };
+  const col = val('color'), sz = Number(val('sz')), font = val('rFonts', 'ascii') || val('rFonts', 'hAnsi');
+  return { b: on('b'), i: on('i'), u: on('u'), strike: on('strike') || on('dstrike'), va: va ? attr(va, 'val') : '',
+    color: /^[0-9a-f]{6}$/i.test(col) ? '#' + col.toLowerCase() : '', size: sz > 0 ? sz / 2 : 0, font: /^[\w .-]{1,60}$/.test(font) ? font : '' };
 }
+// mammoth drops colour, size and font, so they are put back as an inline style (on the new text, and on the old text in data-was).
+const styleOf = (l) => [l.color && `color:${l.color}`, l.size && `font-size:${l.size}pt`, l.font && `font-family:'${l.font}'`].filter(Boolean).join(';');
 function formatChange(run) {
   if (!run || run.localName !== 'r') return '';
   const rPr = [...run.children].find((c) => c.localName === 'rPr'), ch = rPr && [...rPr.children].find((c) => c.localName === 'rPrChange');
   if (!ch) return '';
   const was = looksOf([...ch.children].find((c) => c.localName === 'rPr') || ch), now = looksOf(rPr);
   const labels = LOOKS.filter(([k]) => was[k] !== now[k]).map(([, l]) => l);
+  if (was.color !== now.color) labels.push('Colour');
+  if (was.size !== now.size) labels.push('Size');
+  if (was.font !== now.font) labels.push('Font');
   if (was.va !== now.va) labels.push(now.va === 'superscript' || was.va === 'superscript' ? 'Superscript' : 'Subscript');
   if (!labels.length) return '';
   const tags = [...LOOKS.filter(([k]) => was[k]).map(([, , t]) => t), ...(was.va === 'superscript' ? ['sup'] : was.va === 'subscript' ? ['sub'] : [])];
-  return `F|${enc(attr(ch, 'author'))}|${Date.parse(attr(ch, 'date')) || Date.now()}|${enc(labels.join(', '))}|${enc(tags.map((t) => `<${t}>`).join(''))}|${enc(tags.reverse().map((t) => `</${t}>`).join(''))}`;
+  return `F|${enc(attr(ch, 'author'))}|${Date.parse(attr(ch, 'date')) || Date.now()}|${enc(labels.join(', '))}|${enc(tags.map((t) => `<${t}>`).join(''))}|${enc(tags.reverse().map((t) => `</${t}>`).join(''))}|${enc(styleOf(now))}|${enc(styleOf(was))}`;
 }
 
 // Turns the markers in mammoth's HTML back into elements.
@@ -373,8 +381,9 @@ function unmark(html, comments, notes) {
       }
       if (f[0] === 'F') {       // a tracked formatting change: the text as it was is kept in data-was
         const plain = body.replace(/<[^>]*>/g, '');
-        const was = dec(f[4]) + plain + dec(f[5]);
-        return `<span class="fc" data-author="${esc(dec(f[1]))}" data-time="${esc(f[2])}" data-label="${esc(dec(f[3]))}" data-was="${esc(was)}" data-lift="1">${body}</span>`;
+        const sty = (st, t) => (st ? `<span style="${esc(st)}">${t}</span>` : t);
+        const was = dec(f[4]) + sty(dec(f[7] || ''), plain) + dec(f[5]);
+        return `<span class="fc" data-author="${esc(dec(f[1]))}" data-time="${esc(f[2])}" data-label="${esc(dec(f[3]))}" data-was="${esc(was)}" data-lift="1">${sty(dec(f[6] || ''), body)}</span>`;
       }
       if (f[0] === 'C') {
         const id = dec(f[1]);
