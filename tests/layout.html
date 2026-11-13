@@ -877,6 +877,46 @@ const tests = [
     if (!p || !/Make this louder/.test(p.textContent) || /ff0000|Arial/i.test(ed.innerHTML) || !/#0000ff|0000ff|rgb\(0, 0, 255\)/i.test(ed.innerHTML)) f.push('reject did not restore the old look: ' + ed.innerHTML.slice(0, 300));
     return { fail: f, info: fc.dataset.label };
   } },
+  { name: 'Compare marks merged and split cells and per-side borders, and Reject puts them back', async run() {
+    const { diffHtml } = await import('../js/compare.js?t=' + Date.now());
+    const merged = '<p>Intro.</p><table><tbody><tr><td colspan="2">Wide cell</td></tr><tr><td>C</td><td>D</td></tr></tbody></table>';
+    const split = '<p>Intro.</p><table><tbody><tr><td>Wide cell</td><td><br></td></tr><tr><td>C</td><td>D</td></tr></tbody></table>';
+    const f = [], cells = () => [...ed.querySelectorAll('tr')].map((tr) => tr.cells.length + ':' + [...tr.cells].map((c) => c.colSpan).join('')).join(' ');
+    // merged in the old, split in the new
+    let r = diffHtml(merged, split);
+    await load(r.html);
+    const m1 = ed.querySelector('span.fc[data-cell-span]');
+    if (!m1 || m1.dataset.cellSpan !== '2,1' || !/split/.test(m1.dataset.label)) f.push('split cell not marked: ' + (m1 && m1.outerHTML));
+    D.querySelector('[data-cmd="rejectAll"]').click();
+    await sleep(250);
+    if (cells() !== '1:2 2:11') f.push('rejecting a split should merge the cell again, rows read ' + cells());
+    // split in the old, merged in the new
+    r = diffHtml(split, merged);
+    await load(r.html);
+    const m2 = ed.querySelector('span.fc[data-cell-span]');
+    if (!m2 || m2.dataset.cellSpan !== '1,1' || !/merged/.test(m2.dataset.label)) f.push('merged cell not marked: ' + (m2 && m2.outerHTML));
+    D.querySelector('[data-cmd="rejectAll"]').click();
+    await sleep(250);
+    if (cells() !== '2:11 2:11') f.push('rejecting a merge should split the cell again, rows read ' + cells());
+    // a vertical merge
+    const v1 = '<table><tbody><tr><td rowspan="2">Tall</td><td>B</td></tr><tr><td>C</td></tr></tbody></table>', v2 = '<table><tbody><tr><td>Tall</td><td>B</td></tr><tr><td><br></td><td>C</td></tr></tbody></table>';
+    r = diffHtml(v1, v2);
+    await load(r.html);
+    D.querySelector('[data-cmd="rejectAll"]').click();
+    await sleep(250);
+    const tall = ed.querySelector('td');
+    if (tall.rowSpan !== 2 || ed.querySelectorAll('tr')[1].cells.length !== 1) f.push('rejecting a vertical split should merge it again: ' + ed.querySelector('table').outerHTML);
+    // per-side borders
+    const plain = '<table><tbody><tr><td>One</td><td>Two</td></tr></tbody></table>', edged = '<table><tbody><tr><td>One</td><td style="border-left: 3px solid red; border-bottom: 2px solid blue">Two</td></tr></tbody></table>';
+    r = diffHtml(plain, edged);
+    await load(r.html);
+    const b = ed.querySelector('span.fc[data-cell-style]');
+    if (!b || !/left border/.test(b.dataset.label) || !/bottom border/.test(b.dataset.label)) f.push('border change not marked: ' + (b && b.outerHTML));
+    D.querySelector('[data-cmd="rejectAll"]').click();
+    await sleep(250);
+    if (ed.querySelectorAll('td')[1].getAttribute('style')) f.push('rejecting did not remove the borders: ' + ed.querySelector('table').outerHTML);
+    return { fail: f };
+  } },
   { name: 'Back to 1 column removes every temporary wrapper', async run() {
     await load(longText(), 2); await setCols(1);
     const n = ed.querySelectorAll('.pgs-part').length;

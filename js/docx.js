@@ -262,7 +262,7 @@ export async function exportDocx(root, { title = 'Document', page, hf = null, st
     }
     if (t === 'SPAN' && cl.contains('fc') && !plain) {
       // Table shading, borders and column widths are marked in the page only: Word has no run-level record of them.
-      if ('cellStyle' in node.dataset || 'tableClass' in node.dataset || 'tableCols' in node.dataset || 'hfKey' in node.dataset) return kids(node, f);
+      if ('cellStyle' in node.dataset || 'cellSpan' in node.dataset || 'tableClass' in node.dataset || 'tableCols' in node.dataset || 'hfKey' in node.dataset) return kids(node, f);
       // Tracked formatting: the runs carry the new look; w:rPrChange holds what they looked like before.
       const tmp = document.createElement('div');
       tmp.innerHTML = node.dataset.was || '';
