@@ -960,6 +960,26 @@ const tests = [
     }
     return { fail: f, info: tc.length + ' cell changes, ' + marks.length + ' marks' };
   } },
+  { name: 'Untracked cell shading and borders in a Word file come back on the cells', async run() {
+    const { prepare } = await import('../js/docximport.js?t=' + Date.now());
+    const { exportDocx, loadScript } = await import('../js/docx.js?t=' + Date.now());
+    const JSZip = await loadScript('../vendor/jszip.min.js', 'JSZip'), mammoth = await loadScript('../vendor/mammoth.browser.min.js', 'mammoth');
+    const root = document.createElement('div');
+    root.innerHTML = '<table><tbody><tr><td style="background-color:#ffff00;border-bottom:2px dashed #0000ff">Shaded</td><td></td><td>Plain</td></tr></tbody></table>';
+    const f = [];
+    const buf = await (await exportDocx(root, { title: 't', page: { w: 210, h: 297, m: { t: 25, r: 25, b: 25, l: 25 } } })).arrayBuffer();
+    const rich = await prepare(JSZip, buf);
+    const box = document.createElement('div');
+    box.innerHTML = rich.finish((await mammoth.convertToHtml({ arrayBuffer: rich.buffer })).value);
+    const cells = box.querySelectorAll('td');
+    const st = (c) => c.getAttribute('style') || '';
+    if (!/background-color: (#ffff00|rgb\(255, 255, 0\))/.test(st(cells[0]))) f.push('shading lost: ' + cells[0].outerHTML);
+    if (!/border-bottom: 2px dashed (#0000ff|rgb\(0, 0, 255\))/.test(st(cells[0]))) f.push('border lost: ' + cells[0].outerHTML);
+    if (cells[0].querySelector('span')) f.push('a wrapper was left in the cell: ' + cells[0].outerHTML);
+    if (st(cells[2])) f.push('a plain cell gained a style: ' + st(cells[2]));
+    if (cells[1].textContent !== '') f.push('the empty cell gained text: ' + JSON.stringify(cells[1].textContent));
+    return { fail: f, info: cells[0].outerHTML };
+  } },
   { name: 'Back to 1 column removes every temporary wrapper', async run() {
     await load(longText(), 2); await setCols(1);
     const n = ed.querySelectorAll('.pgs-part').length;

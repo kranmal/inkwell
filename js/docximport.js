@@ -295,25 +295,38 @@ function mark(doc, comments, notes, sects, charts, smart) {
     return out;
   };
   const fillOf = (pr) => { const sh = pr && [...pr.children].find((c) => c.localName === 'shd'), v = sh ? attr(sh, 'fill') : ''; return /^[0-9a-f]{6}$/i.test(v) ? v.toLowerCase() : ''; };
-  for (const tc of kids(doc.documentElement, 'tc')) {
-    const pr = [...tc.children].find((c) => c.localName === 'tcPr'), ch = pr && [...pr.children].find((c) => c.localName === 'tcPrChange');
-    if (!ch) continue;
-    const old = [...ch.children].find((c) => c.localName === 'tcPr');
-    const was = fillOf(old), now = fillOf(pr), wasB = bordersOf(old), nowB = bordersOf(pr);
-    const spanOf = (q) => { const g = q && [...q.children].find((c) => c.localName === 'gridSpan'); return Math.max(1, parseInt(g && attr(g, 'val'), 10) || 1); };
-    const vOf = (q) => (q && [...q.children].some((c) => c.localName === 'vMerge') ? 1 : 0);
-    const wasCs = spanOf(old), wasV = vOf(old);
-    if (was === now && wasB === nowB && wasCs === spanOf(pr) && wasV === vOf(pr)) continue;
+  // The cell's first text, made if the cell is empty (a zero-width space for the mark to wrap).
+  const firstText = (tc) => {
     let t = kids(tc, 't')[0];
-    if (!t) {                                   // an empty cell: give the mark something to wrap
+    if (!t) {
       const p0 = kids(tc, 'p')[0];
-      if (!p0) continue;
+      if (!p0) return null;
       const r = doc.createElementNS(W, 'w:r');
       t = doc.createElementNS(W, 'w:t');
       t.textContent = '\u200b';
       r.append(t); p0.append(r);
     }
     t.setAttribute('xml:space', 'preserve');
+    return t;
+  };
+  const DEFAULT_FILLS = ['f2f2f0', 'f3f5f4'];      // what Inkwell itself writes for header and striped cells
+  for (const tc of kids(doc.documentElement, 'tc')) {
+    const pr = [...tc.children].find((c) => c.localName === 'tcPr'), ch = pr && [...pr.children].find((c) => c.localName === 'tcPrChange');
+    if (!ch) {                                  // an untracked shading or border: carried the same way, with nothing to undo
+      const fill = fillOf(pr), bd = bordersOf(pr);
+      if (!pr || (!bd && (!fill || DEFAULT_FILLS.includes(fill)))) continue;
+      const t0 = firstText(tc);
+      if (t0) t0.textContent = `${O}L|${enc(DEFAULT_FILLS.includes(fill) ? '' : fill)}|${enc(bd)}${M}${t0.textContent}${C}`;
+      continue;
+    }
+    const old = [...ch.children].find((c) => c.localName === 'tcPr');
+    const was = fillOf(old), now = fillOf(pr), wasB = bordersOf(old), nowB = bordersOf(pr);
+    const spanOf = (q) => { const g = q && [...q.children].find((c) => c.localName === 'gridSpan'); return Math.max(1, parseInt(g && attr(g, 'val'), 10) || 1); };
+    const vOf = (q) => (q && [...q.children].some((c) => c.localName === 'vMerge') ? 1 : 0);
+    const wasCs = spanOf(old), wasV = vOf(old);
+    if (was === now && wasB === nowB && wasCs === spanOf(pr) && wasV === vOf(pr)) continue;
+    const t = firstText(tc);
+    if (!t) continue;
     t.textContent = `${O}K|${enc(attr(ch, 'author'))}|${Date.parse(attr(ch, 'date')) || Date.now()}|${enc(was)}|${enc(now)}|${enc(wasB)}|${enc(nowB)}|${wasCs}|${wasV}${M}${t.textContent}${C}`;
   }
   const walk = (el) => {
@@ -425,6 +438,7 @@ function unmark(html, comments, notes) {
         const was = dec(f[4]) + sty(dec(f[7] || ''), plain) + dec(f[5]);
         return `<span class="fc" data-author="${esc(dec(f[1]))}" data-time="${esc(f[2])}" data-label="${esc(dec(f[3]))}" data-was="${esc(was)}" data-lift="1">${sty(dec(f[6] || ''), body)}</span>`;
       }
+      if (f[0] === 'L') return `<span data-look="1" data-new-bg="${esc(dec(f[1]))}" data-new-border="${esc(dec(f[2]))}"${body === '\u200b' ? ' data-pad="1"' : ''}>${body}</span>`;
       if (f[0] === 'K') {       // a tracked cell change: the old look goes in the mark, the new one is applied to the cell in finish()
         const wasFill = dec(f[3]), wasB = dec(f[5]), fillDiff = wasFill !== dec(f[4]), bordDiff = wasB !== dec(f[6]);
         const label = [fillDiff && 'shading', bordDiff && 'borders'].filter(Boolean).join(', ') || 'merged or split';
@@ -522,13 +536,17 @@ export async function prepare(JSZip, arrayBuffer) {
       if (html.includes('data-new-bg')) {
         const tpl = document.createElement('template');
         tpl.innerHTML = html;
-        for (const sp of tpl.content.querySelectorAll('span.fc[data-new-bg]')) {
+        for (const sp of tpl.content.querySelectorAll('span[data-new-bg]')) {
           const cell = sp.closest('td,th'), bg = sp.getAttribute('data-new-bg'), bd = sp.getAttribute('data-new-border');
           const oldCs = parseInt(sp.getAttribute('data-old-cs'), 10) || 1, oldV = sp.getAttribute('data-old-v') === '1';
           for (const k of ['new-bg', 'new-border', 'old-cs', 'old-v']) sp.removeAttribute('data-' + k);
           if (cell && bg) cell.style.backgroundColor = '#' + bg;
           if (cell && bd) for (const part of bd.split(';')) { const [prop, ...v] = part.split(':'); if (v.length) cell.style.setProperty(prop.trim(), v.join(':').trim()); }
           // Old merge: the width is exact; a cell that was merged downwards is taken to have spanned the rows below it that are now its own, or two.
+          if (sp.hasAttribute('data-look')) {      // untracked: nothing to undo, so drop the wrapper
+            if (sp.hasAttribute('data-pad')) sp.remove(); else sp.replaceWith(...sp.childNodes);
+            continue;
+          }
           if (cell) {
             const rs = oldV ? Math.max(cell.rowSpan, 2) : 1;
             if (oldCs !== cell.colSpan || rs !== cell.rowSpan) sp.setAttribute('data-cell-span', oldCs + ',' + rs);
