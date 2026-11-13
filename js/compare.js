@@ -21,7 +21,11 @@ function parse(html) {
   d.querySelectorAll('ins.tc').forEach((x) => x.replaceWith(...x.childNodes));
   return d;
 }
-const leaves = (root) => [...root.querySelectorAll(LEAF)].filter((el) => !el.closest(SKIP) && !el.querySelector(LEAF) && norm(el.textContent));
+const hash = (str) => { let h = 5381; for (let i = 0; i < str.length; i++) h = ((h << 5) + h + str.charCodeAt(i)) | 0; return (h >>> 0).toString(36); };
+const imgSig = (img) => 'img' + hash(img.getAttribute('src') || '');
+// A paragraph's identity: its text plus its pictures, so a replaced or added picture counts as a change.
+const sig = (el) => [norm(el.textContent), ...[...el.querySelectorAll('img')].map(imgSig)].join(' ').trim();
+const leaves = (root) => [...root.querySelectorAll(LEAF)].filter((el) => !el.closest(SKIP) && !el.querySelector(LEAF) && (norm(el.textContent) || el.querySelector('img')));
 
 // Best in-order pairing of two sequences. score(i, j) > 0 means a and b may be paired.
 // Returns [[i, j], ...] ascending, or null when the input is too large to align.
@@ -57,7 +61,7 @@ function similar(a, b) {
 
 // Pairs the leaves of two documents: equal text first, then edited ones inside the gaps.
 function pairUp(a, b) {
-  const ta = a.map((e) => norm(e.textContent)), tb = b.map((e) => norm(e.textContent));
+  const ta = a.map(sig), tb = b.map(sig);
   let lo = 0;
   while (lo < ta.length && lo < tb.length && ta[lo] === tb[lo]) lo++;
   let ea = ta.length, eb = tb.length;
@@ -127,12 +131,72 @@ export function diffHtml(oldHtml, newHtml) {
   const a = leaves(A), b = leaves(B);
   const ops = pairUp(a, b);
   const st = { added: 0, removed: 0, edited: 0, unmarked: 0 };
+  const byOld = new Map(), aIdx = new Map(a.map((e, i) => [e, i]));
+  ops.forEach((o) => { if (o.o !== undefined) byOld.set(o.o, o); });
+  const delContent = (src) => { const w = mark('del', time); w.textContent = norm(src.textContent); src.querySelectorAll('img').forEach((i) => w.append(i.cloneNode(true))); return w; };
+  // Pictures that are new in el get an insertion mark, pictures that were in src and are gone are shown as deleted.
+  const markImages = (src, el) => {
+    const was = new Map(), now = new Map();
+    for (const i of src.querySelectorAll('img')) was.set(imgSig(i), (was.get(imgSig(i)) || 0) + 1);
+    for (const i of el.querySelectorAll('img')) now.set(imgSig(i), (now.get(imgSig(i)) || 0) + 1);
+    let n = 0;
+    for (const i of [...el.querySelectorAll('img')]) {
+      const g = imgSig(i);
+      if (was.get(g) > 0) { was.set(g, was.get(g) - 1); continue; }
+      const w = mark('ins', time); i.replaceWith(w); w.append(i); n++;
+    }
+    for (const i of src.querySelectorAll('img')) {
+      const g = imgSig(i);
+      if (now.get(g) > 0) { now.set(g, now.get(g) - 1); continue; }
+      const w = mark('del', time); w.append(i.cloneNode(true)); el.append(w); n++;
+    }
+    return n;
+  };
+  const rowLeaves = new Map();
+  a.forEach((e, i) => { const tr = e.closest('tr'); if (tr) { if (!rowLeaves.has(tr)) rowLeaves.set(tr, []); rowLeaves.get(tr).push(i); } });
+  const ghostAfter = new Map(), doneRows = new Set();
+  const near = (k, dir) => { for (let q = k + dir; q >= 0 && q < ops.length; q += dir) if (ops[q].o !== undefined && ops[q].n !== undefined) return ops[q]; return null; };
+  // A removed table cell: shown inside the same cell of the surviving row, or, when the whole row is gone, as a struck-out row.
+  const delInTable = (src, k) => {
+    const cell = src.closest('td,th'), tr = src.closest('tr');
+    if (!cell || !tr) return false;
+    const kept = (rowLeaves.get(tr) || []).map((i) => byOld.get(i)).find((o) => o && o.n !== undefined);
+    if (kept) {
+      const row = b[kept.n].closest('tr'), at = [...tr.children].indexOf(cell);
+      const target = row.children[at] || row.lastElementChild;
+      if (!target) return false;
+      if (target.textContent.trim()) target.append(' ');
+      target.append(delContent(src));
+      return true;
+    }
+    if (doneRows.has(tr)) return true;
+    const table = tr.closest('table'), ok = (o) => o && a[o.o].closest('table') === table && b[o.n].closest('tr');
+    const prev = near(k, -1), next = near(k, 1);
+    const g = document.createElement('tr');
+    for (const c of tr.children) {
+      const t = document.createElement(c.tagName.toLowerCase());
+      for (const at of ['colspan', 'rowspan']) if (c.hasAttribute(at)) t.setAttribute(at, c.getAttribute(at));
+      const w = delContent(c);
+      if (w.textContent || w.querySelector('img')) t.append(w);
+      g.append(t);
+    }
+    if (ok(prev)) { const anchor = b[prev.n].closest('tr'); (ghostAfter.get(anchor) || anchor).after(g); ghostAfter.set(anchor, g); } else if (ok(next)) b[next.n].closest('tr').before(g); else return false;
+    doneRows.add(tr);
+    return true;
+  };
   ops.forEach((op, k) => {
     if (op.t === 'eq') return;
     if (op.t === 'mod') {
-      const el = b[op.n];
-      if (el.querySelector(OBJ)) { st.unmarked++; return; }
-      el.innerHTML = wordDiff(norm(a[op.o].textContent), norm(el.textContent), time);
+      const el = b[op.n], src = a[op.o];
+      if (el.querySelector(OBJ)) {
+        // Rebuilding the paragraph would lose its objects, so only changes to pictures are marked.
+        const m = markImages(src, el);
+        if (m) st.edited++;
+        if (norm(src.textContent) !== norm(el.textContent) || !m) st.unmarked++;
+        return;
+      }
+      el.innerHTML = wordDiff(norm(src.textContent), norm(el.textContent), time);
+      markImages(src, el);
       st.edited++;
     } else if (op.t === 'ins') {
       const w = mark('ins', time);
@@ -141,14 +205,13 @@ export function diffHtml(oldHtml, newHtml) {
       st.added++;
     } else {
       const src = a[op.o];
-      if (/^(TD|TH)$/.test(src.tagName)) { st.unmarked++; return; }
+      if (src.closest('td,th')) { if (delInTable(src, k)) st.removed++; else st.unmarked++; return; }
       const next = ops.slice(k + 1).find((o) => o.n !== undefined);
       const anchor = next ? b[next.n] : null;
       const asLi = src.tagName === 'LI' && anchor && anchor.tagName === 'LI';
       const el = document.createElement(src.tagName === 'LI' && !asLi ? 'p' : src.tagName.toLowerCase());
       if (src.className && !asLi) el.className = src.className;
-      const w = mark('del', time); w.textContent = norm(src.textContent);
-      el.append(w);
+      el.append(delContent(src));
       if (anchor) (asLi ? anchor : topOf(B, anchor)).before(el);
       else { const notes = B.querySelector(':scope > ol.footnotes,:scope > ol.endnotes'); if (notes) notes.before(el); else B.append(el); }
       st.removed++;
