@@ -278,12 +278,32 @@ function mark(doc, comments, notes, sects, charts, smart) {
   }
   // A tracked change to a cell's shading (w:tcPrChange): mammoth drops cell shading, so the cell's first text carries a marker
   // with the new and old fill, and finish() turns it into the cell's background plus a mark that Reject can undo.
+  // A cell's own borders as CSS (top, right, bottom, left): w:sz is eighths of a point, drawn at 96 dpi as px = sz / 6.
+  const BCSS = { single: 'solid', thick: 'solid', dashed: 'dashed', dotted: 'dotted', double: 'double', nil: 'none', none: 'none' };
+  const bordersOf = (pr) => {
+    const bs = pr && [...pr.children].find((c) => c.localName === 'tcBorders');
+    if (!bs) return '';
+    let out = '';
+    for (const [side, names] of [['top', ['top']], ['right', ['right', 'end']], ['bottom', ['bottom']], ['left', ['left', 'start']]]) {
+      const e = [...bs.children].find((c) => names.includes(c.localName));
+      if (!e) continue;
+      const st = BCSS[attr(e, 'val')] || 'solid';
+      if (st === 'none') { out += `border-${side}: none;`; continue; }
+      const px = Math.max(1, Math.round((parseInt(attr(e, 'sz'), 10) || 4) / 6 * 10) / 10), col = attr(e, 'color');
+      out += `border-${side}: ${px}px ${st} ${/^[0-9a-f]{6}$/i.test(col) ? '#' + col.toLowerCase() : '#000'};`;
+    }
+    return out;
+  };
   const fillOf = (pr) => { const sh = pr && [...pr.children].find((c) => c.localName === 'shd'), v = sh ? attr(sh, 'fill') : ''; return /^[0-9a-f]{6}$/i.test(v) ? v.toLowerCase() : ''; };
   for (const tc of kids(doc.documentElement, 'tc')) {
     const pr = [...tc.children].find((c) => c.localName === 'tcPr'), ch = pr && [...pr.children].find((c) => c.localName === 'tcPrChange');
     if (!ch) continue;
-    const was = fillOf([...ch.children].find((c) => c.localName === 'tcPr')), now = fillOf(pr);
-    if (was === now) continue;
+    const old = [...ch.children].find((c) => c.localName === 'tcPr');
+    const was = fillOf(old), now = fillOf(pr), wasB = bordersOf(old), nowB = bordersOf(pr);
+    const spanOf = (q) => { const g = q && [...q.children].find((c) => c.localName === 'gridSpan'); return Math.max(1, parseInt(g && attr(g, 'val'), 10) || 1); };
+    const vOf = (q) => (q && [...q.children].some((c) => c.localName === 'vMerge') ? 1 : 0);
+    const wasCs = spanOf(old), wasV = vOf(old);
+    if (was === now && wasB === nowB && wasCs === spanOf(pr) && wasV === vOf(pr)) continue;
     let t = kids(tc, 't')[0];
     if (!t) {                                   // an empty cell: give the mark something to wrap
       const p0 = kids(tc, 'p')[0];
@@ -294,7 +314,7 @@ function mark(doc, comments, notes, sects, charts, smart) {
       r.append(t); p0.append(r);
     }
     t.setAttribute('xml:space', 'preserve');
-    t.textContent = `${O}K|${enc(attr(ch, 'author'))}|${Date.parse(attr(ch, 'date')) || Date.now()}|${enc(was)}|${enc(now)}${M}${t.textContent}${C}`;
+    t.textContent = `${O}K|${enc(attr(ch, 'author'))}|${Date.parse(attr(ch, 'date')) || Date.now()}|${enc(was)}|${enc(now)}|${enc(wasB)}|${enc(nowB)}|${wasCs}|${wasV}${M}${t.textContent}${C}`;
   }
   const walk = (el) => {
     for (const n of [...el.childNodes]) {
@@ -405,9 +425,11 @@ function unmark(html, comments, notes) {
         const was = dec(f[4]) + sty(dec(f[7] || ''), plain) + dec(f[5]);
         return `<span class="fc" data-author="${esc(dec(f[1]))}" data-time="${esc(f[2])}" data-label="${esc(dec(f[3]))}" data-was="${esc(was)}" data-lift="1">${sty(dec(f[6] || ''), body)}</span>`;
       }
-      if (f[0] === 'K') {       // a tracked cell shading change: the old fill goes in the mark, the new one is applied to the cell in finish()
-        const wasFill = dec(f[3]);
-        return `<span class="fc" data-author="${esc(dec(f[1]))}" data-time="${esc(f[2])}" data-label="Cell shading" data-cell-style="${wasFill ? `background-color: #${wasFill};` : ''}" data-new-bg="${esc(dec(f[4]))}"${body === '\u200b' ? ' data-pad="1"' : ''}>${body}</span>`;
+      if (f[0] === 'K') {       // a tracked cell change: the old look goes in the mark, the new one is applied to the cell in finish()
+        const wasFill = dec(f[3]), wasB = dec(f[5]), fillDiff = wasFill !== dec(f[4]), bordDiff = wasB !== dec(f[6]);
+        const label = [fillDiff && 'shading', bordDiff && 'borders'].filter(Boolean).join(', ') || 'merged or split';
+        const style = (wasFill ? `background-color: #${wasFill};` : '') + wasB;
+        return `<span class="fc" data-author="${esc(dec(f[1]))}" data-time="${esc(f[2])}" data-label="Cell ${label}"${fillDiff || bordDiff ? ` data-cell-style="${esc(style)}"` : ''} data-new-bg="${esc(dec(f[4]))}" data-new-border="${esc(dec(f[6]))}" data-old-cs="${esc(f[7])}" data-old-v="${esc(f[8])}"${body === '\u200b' ? ' data-pad="1"' : ''}>${body}</span>`;
       }
       if (f[0] === 'C') {
         const id = dec(f[1]);
@@ -501,9 +523,16 @@ export async function prepare(JSZip, arrayBuffer) {
         const tpl = document.createElement('template');
         tpl.innerHTML = html;
         for (const sp of tpl.content.querySelectorAll('span.fc[data-new-bg]')) {
-          const cell = sp.closest('td,th'), bg = sp.getAttribute('data-new-bg');
-          sp.removeAttribute('data-new-bg');
+          const cell = sp.closest('td,th'), bg = sp.getAttribute('data-new-bg'), bd = sp.getAttribute('data-new-border');
+          const oldCs = parseInt(sp.getAttribute('data-old-cs'), 10) || 1, oldV = sp.getAttribute('data-old-v') === '1';
+          for (const k of ['new-bg', 'new-border', 'old-cs', 'old-v']) sp.removeAttribute('data-' + k);
           if (cell && bg) cell.style.backgroundColor = '#' + bg;
+          if (cell && bd) for (const part of bd.split(';')) { const [prop, ...v] = part.split(':'); if (v.length) cell.style.setProperty(prop.trim(), v.join(':').trim()); }
+          // Old merge: the width is exact; a cell that was merged downwards is taken to have spanned the rows below it that are now its own, or two.
+          if (cell) {
+            const rs = oldV ? Math.max(cell.rowSpan, 2) : 1;
+            if (oldCs !== cell.colSpan || rs !== cell.rowSpan) sp.setAttribute('data-cell-span', oldCs + ',' + rs);
+          }
         }
         html = tpl.innerHTML;
       }
