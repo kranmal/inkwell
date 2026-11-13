@@ -626,6 +626,36 @@ const tests = [
     if (t2.querySelector('span.fc')) f.push('marks left after accepting');
     return { fail: f, info: JSON.stringify(r.stats) };
   } },
+  { name: 'A Compare result exports as Word tracked changes and re-imports as the same marks', async run() {
+    const { diffHtml } = await import('../js/compare.js?t=' + Date.now());
+    const { exportDocx, loadScript } = await import('../js/docx.js?t=' + Date.now());
+    const { prepare } = await import('../js/docximport.js?t=' + Date.now());
+    const oldH = '<p>Keep this <b>bold</b> word and old text here.</p><p>Removed paragraph entirely.</p><p>Format me please.</p><table><tbody><tr><td>A</td><td style="background-color:#ff0">B</td></tr></tbody></table><p>Tail.</p>';
+    const newH = '<p>Keep this <b>bold</b> word and new text here.</p><p>Brand new paragraph.</p><p>Format <b>me</b> please.</p><table class="tb-striped"><tbody><tr><td>A</td><td style="background-color:#0ff">B</td></tr></tbody></table><p>Tail.</p>';
+    const r = diffHtml(oldH, newH), f = [];
+    const root = document.createElement('div');
+    root.innerHTML = r.html;
+    const JSZip = await loadScript('../vendor/jszip.min.js', 'JSZip'), mammoth = await loadScript('../vendor/mammoth.browser.min.js', 'mammoth');
+    const blob = await exportDocx(root, { title: 't', page: { w: 210, h: 297, m: { t: 25, r: 25, b: 25, l: 25 } } });
+    const zip = await JSZip.loadAsync(await blob.arrayBuffer());
+    const xml = await zip.file('word/document.xml').async('string');
+    const count = (re) => (xml.match(re) || []).length;
+    if (count(/<w:del /g) < 2 || !/<w:delText[^>]*>Removed paragraph entirely/.test(xml)) f.push('deleted text is not a tracked deletion');
+    if (count(/<w:ins /g) < 2) f.push('inserted text is not a tracked insertion');
+    if (!/<w:pPr><w:rPr><w:del /.test(xml)) f.push('the removed paragraph mark is not tracked');
+    if (!/<w:pPr><w:rPr><w:ins /.test(xml)) f.push('the added paragraph mark is not tracked');
+    if (count(/<w:rPrChange /g) !== 1) f.push('expected 1 formatting change, found ' + count(/<w:rPrChange /g) + ' (table shading must not become a run change)');
+    const ids = [...xml.matchAll(/<w:(?:ins|del|rPrChange) w:id="(\d+)"/g)].map((m) => m[1]);
+    if (new Set(ids).size !== ids.length) f.push('tracked change ids repeat');
+    const rich = await prepare(JSZip, await blob.arrayBuffer());
+    const box = document.createElement('div');
+    box.innerHTML = rich.finish((await mammoth.convertToHtml({ arrayBuffer: rich.buffer })).value);
+    const text = (sel) => [...box.querySelectorAll(sel)].map((x) => x.textContent).join('|');
+    if (!/old/.test(text('del.tc')) || !/Removed paragraph entirely/.test(text('del.tc'))) f.push('deletions came back as ' + text('del.tc'));
+    if (!/new/.test(text('ins.tc')) || !/Brand new paragraph/.test(text('ins.tc'))) f.push('insertions came back as ' + text('ins.tc'));
+    if (box.querySelector('ins.tc')?.dataset.author !== 'Compare') f.push('author lost');
+    return { fail: f, info: count(/<w:ins /g) + ' ins, ' + count(/<w:del /g) + ' del' };
+  } },
   { name: 'PDF export has one page per layout page, real text, links and bookmarks', async run() {
     await load(`<h1>Heading one</h1><p>Visit <a href="https://example.com/x">our site</a> and <b>read</b> this.</p><p>${lorem(1200)}</p><h2>Second</h2><p>${lorem(300)}</p>`, 1);
     const pdf = await W.eval(`import('${new URL('../js/pdf.js', location.href).href}')`), pages = (await W.eval(`import('${new URL('../js/pages.js', location.href).href}')`)).count();
