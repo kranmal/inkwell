@@ -23,10 +23,10 @@ function parse(html) {
 const hash = (str) => { let h = 5381; for (let i = 0; i < str.length; i++) h = ((h << 5) + h + str.charCodeAt(i)) | 0; return (h >>> 0).toString(36); };
 const imgSig = (img) => 'img' + hash(img.getAttribute('src') || '');
 // A paragraph's identity: its text plus its pictures, so a replaced or added picture counts as a change.
-// Equations are left out of a paragraph's text: they are compared as objects, so an equation-only change is not a text edit.
-const plain = (el) => { if (!el.querySelector('.eq')) return norm(el.textContent); const c = el.cloneNode(true); c.querySelectorAll('.eq').forEach((q) => q.remove()); return norm(c.textContent); };
+// Inline objects (equations, WordArt) are left out of a paragraph's text: they are compared as objects, so a change to one is not a text edit.
+const plain = (el) => { if (!el.querySelector('.eq,.wordart')) return norm(el.textContent); const c = el.cloneNode(true); c.querySelectorAll('.eq,.wordart').forEach((q) => q.remove()); return norm(c.textContent); };
 const sig = (el) => [plain(el), ...[...el.querySelectorAll('img')].map(imgSig)].join(' ').trim();
-const leaves = (root) => [...root.querySelectorAll(LEAF)].filter((el) => !el.closest(SKIP) && !el.querySelector(LEAF) && (norm(el.textContent) || el.querySelector('img,.eq')));
+const leaves = (root) => [...root.querySelectorAll(LEAF)].filter((el) => !el.closest(SKIP) && !el.querySelector(LEAF) && (norm(el.textContent) || el.querySelector('img,.eq,.wordart')));
 
 // Best in-order pairing of two sequences. score(i, j) > 0 means a and b may be paired.
 // Returns [[i, j], ...] ascending, or null when the input is too large to align.
@@ -227,9 +227,9 @@ function markText(el, src, time) {
 // ---------- charts, shapes and SmartArt ----------
 // Each is compared as a whole: same data and look means unchanged. A changed one is shown as the old object
 // struck out beside the new one marked as inserted; added and removed ones are marked where they are (or were).
-const OBJS = '.chart,.shape,.smartart,.eq';
-const kindOf = (el) => (el.classList.contains('chart') ? 'chart' : el.classList.contains('smartart') ? 'smartart' : el.classList.contains('eq') ? 'eq' : 'shape');
-const objSig = (el) => { const k = kindOf(el); return k + hash(k === 'chart' ? (el.dataset.chart || '') + el.style.width : k === 'smartart' ? el.dataset.sa || '' : k === 'eq' ? el.dataset.eq || norm(el.textContent) : el.className + '|' + (el.getAttribute('style') || '') + '|' + norm(el.textContent)); };
+const OBJS = '.chart,.shape,.smartart,.eq,.textbox,.wordart';
+const kindOf = (el) => (el.classList.contains('chart') ? 'chart' : el.classList.contains('smartart') ? 'smartart' : el.classList.contains('eq') ? 'eq' : el.classList.contains('textbox') ? 'textbox' : el.classList.contains('wordart') ? 'wordart' : 'shape');
+const objSig = (el) => { const k = kindOf(el); return k + hash(k === 'chart' ? (el.dataset.chart || '') + el.style.width : k === 'smartart' ? el.dataset.sa || '' : k === 'eq' ? el.dataset.eq || norm(el.textContent) : k === 'textbox' ? el.className + '|' + (el.getAttribute('style') || '') + '|' + el.innerHTML : el.className + '|' + (el.getAttribute('style') || '') + '|' + norm(el.textContent)); };
 const objectsOf = (root) => [...root.querySelectorAll(OBJS)].filter((e) => !e.parentElement.closest(OBJS + ',ins.tc,del.tc'));
 function markObjects(A, B, time, st, home) {
   const a = objectsOf(A), b = objectsOf(B), n = a.length, m = b.length;
@@ -244,6 +244,7 @@ function markObjects(A, B, time, st, home) {
     if (sa[i] === sb[j]) { close(i, j); i++; j++; gi = i; gj = j; } else if (L[i + 1][j] >= L[i][j + 1]) i++; else j++;
   }
   close(n, m);
+  const tail = new Map();
   const ghost = (src) => { const w = mark('del', time); w.append(src.cloneNode(true)); return w; };
   const wrap = (el) => { const w = mark('ins', time); el.replaceWith(w); w.append(el); return w; };
   for (const g of gaps) {
@@ -255,8 +256,11 @@ function markObjects(A, B, time, st, home) {
     }
     for (const o of free) gone.push([o, ghost(o)]);
     for (const [o, w] of gone) {
-      const h = home && home(o);       // a removed equation goes back into its own paragraph
-      if (h) { h.append(' ', w); st.removed++; continue; }
+      const h = home && home(o);       // a removed object goes back next to the paragraphs that kept their place
+      if (h) {
+        if (h.how === 'append') h.at.append(' ', w); else if (h.how === 'before') h.at.before(w); else { (tail.get(h.at) || h.at).after(w); tail.set(h.at, w); }
+        st.removed++; continue;
+      }
       if (g.anchor) g.anchor.before(w);
       else if (m) { const last = b[m - 1]; (last.parentElement.matches('ins.tc') ? last.parentElement : last).after(w); } else { const notes = B.querySelector(':scope > ol.footnotes,:scope > ol.endnotes'); if (notes) notes.before(w); else B.append(w); }
       st.removed++;
@@ -351,9 +355,19 @@ export function diffHtml(oldHtml, newHtml) {
     }
   });
   markObjects(A, B, time, st, (o) => {
-    if (!o.matches('.eq')) return null;
-    const i = aIdx.get(o.closest(LEAF)), op = i === undefined ? null : byOld.get(i);
-    return op && op.n !== undefined ? b[op.n] : null;
+    const mapped = (l) => { const i = aIdx.get(l), op = i === undefined ? null : byOld.get(i); return op && op.n !== undefined ? b[op.n] : null; };
+    const lf = o.closest(LEAF);
+    if (lf) { const at = mapped(lf); return at ? { at, how: 'append' } : null; }
+    const top = topOf(A, o), leavesIn = (s) => (s.matches(LEAF) ? [s] : [...s.querySelectorAll(LEAF)]);
+    for (let s = top.previousElementSibling; s; s = s.previousElementSibling) {
+      const at = leavesIn(s).reverse().map(mapped).find(Boolean);
+      if (at) return { at: topOf(B, at), how: 'after' };
+    }
+    for (let s = top.nextElementSibling; s; s = s.nextElementSibling) {
+      const at = leavesIn(s).map(mapped).find(Boolean);
+      if (at) return { at: topOf(B, at), how: 'before' };
+    }
+    return null;
   });
   return { html: B.innerHTML, stats: st, changes: st.added + st.removed + st.edited + st.formatted };
 }
