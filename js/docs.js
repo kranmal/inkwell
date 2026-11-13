@@ -39,6 +39,7 @@ const vdb = () => new Promise((res, rej) => {
 });
 const tx = async (mode, fn) => { const db = await vdb(); return new Promise((res, rej) => { const t = db.transaction('v', mode); const out = fn(t.objectStore('v')); t.oncomplete = () => { db.close(); res(out && out.result); }; t.onerror = () => { db.close(); rej(t.error); }; }); };
 const listV = (docId) => tx('readonly', (s) => s.index('doc').getAll(docId)).then((a) => (a || []).sort((x, y) => y.ts - x.ts));
+export const versionsOf = (docId) => listV(docId);
 const putV = (v) => tx('readwrite', (s) => s.put(v));
 const delV = (vid) => tx('readwrite', (s) => s.delete(vid));
 const wordsOf = (html) => { const d = document.createElement('div'); d.innerHTML = html; return (d.textContent.match(/\S+/g) || []).length; };

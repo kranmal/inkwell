@@ -169,6 +169,23 @@ const tests = [
     }
     return { fail: f, info: rows.join(' | ') };
   } },
+  { name: 'Compare marks word edits, added and removed paragraphs', async run() {
+    const { diffHtml } = await import('../js/compare.js?t=' + Date.now());
+    const old = '<h1>Report</h1><p>Sales rose by ten percent this year.</p><p>We will hire two people.</p><p>Gone entirely now.</p>';
+    const cur = '<h1>Report</h1><p>Sales rose by twelve percent this year.</p><p>We will hire three people and a manager.</p><p>Brand new note.</p>';
+    const r = diffHtml(old, cur), f = [];
+    const box = document.createElement('div'); box.innerHTML = r.html;
+    const txt = (s) => [...box.querySelectorAll(s)].map((x) => x.textContent).join('|');
+    if (txt('del.tc').indexOf('ten') < 0 || txt('ins.tc').indexOf('twelve') < 0) f.push('word edit not marked: ' + r.html);
+    if (box.querySelector('p').nextElementSibling.querySelector('del.tc') && box.querySelectorAll('p')[0].textContent.indexOf('Sales rose by') < 0) f.push('edited paragraph lost its text');
+    if (r.stats.edited < 1) f.push('no edited paragraphs: ' + JSON.stringify(r.stats));
+    if (r.stats.added + r.stats.removed < 2) f.push('adds/removes not counted: ' + JSON.stringify(r.stats));
+    if (!/Gone entirely now/.test(txt('del.tc'))) f.push('removed paragraph missing');
+    if (!/Brand new note/.test(txt('ins.tc'))) f.push('added paragraph missing');
+    const same = diffHtml(cur, cur);
+    if (same.changes || same.html.indexOf('class="tc"') >= 0) f.push('identical documents reported changes');
+    return { fail: f, info: JSON.stringify(r.stats) };
+  } },
   { name: 'Back to 1 column removes every temporary wrapper', async run() {
     await load(longText(), 2); await setCols(1);
     const n = ed.querySelectorAll('.pgs-part').length;
