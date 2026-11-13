@@ -961,6 +961,29 @@ const tests = [
     }
     return { fail: f, info: tc.length + ' cell changes, ' + marks.length + ' marks' };
   } },
+  { name: 'Floated text boxes and charts export as anchored drawings and come back floated', async run() {
+    const { exportDocx, loadScript } = await import('../js/docx.js?t=' + Date.now());
+    const { prepare } = await import('../js/docximport.js?t=' + Date.now());
+    const JSZip = await loadScript('../vendor/jszip.min.js', 'JSZip');
+    const mammoth = await loadScript('../vendor/mammoth.browser.min.js', 'mammoth');
+    const cfg = JSON.stringify({ type: 'column', title: 'T', labels: ['a', 'b'], series: [{ name: 'S', values: [1, 2] }] });
+    const root = document.createElement('div'), f = [];
+    root.innerHTML = `<p>One</p><div class="textbox" style="width:200px;float:right"><p>Right box</p></div><p>Two</p><figure class="chart" style="width:240px;float:left" data-chart='${cfg}'></figure><p>Three</p><div class="textbox" style="width:200px"><p>Inline box</p></div>`;
+    const buf = await (await exportDocx(root, { title: 't', page: { w: 210, h: 297, m: { t: 25, r: 25, b: 25, l: 25 } } })).arrayBuffer();
+    const zip = await JSZip.loadAsync(buf);
+    const xml = await zip.file('word/document.xml').async('string');
+    if (new DOMParser().parseFromString(xml, 'application/xml').querySelector('parsererror')) f.push('document.xml is not well-formed');
+    if ((xml.match(/<wp:anchor /g) || []).length !== 2) f.push('expected two anchored drawings, got ' + (xml.match(/<wp:anchor /g) || []).length);
+    if (!/<wp:align>right<\/wp:align>[\s\S]*<wp:align>left<\/wp:align>/.test(xml)) f.push('alignments are not right then left');
+    if ((xml.match(/<wp:inline /g) || []).length !== 1) f.push('the unfloated box should stay inline');
+    const rich = await prepare(JSZip, buf);
+    const box = document.createElement('div');
+    box.innerHTML = rich.finish((await mammoth.convertToHtml({ arrayBuffer: rich.buffer })).value);
+    const r = [...box.querySelectorAll('.textbox')].find((t) => /Right box/.test(t.textContent)), c = box.querySelector('figure.chart');
+    if (!r || r.style.float !== 'right') f.push('the right box did not come back floated right');
+    if (!c || c.style.float !== 'left') f.push('the chart did not come back floated left');
+    return { fail: f, info: 'ok' };
+  } },
   { name: 'Anchored text boxes and charts in a Word file float to the side they sit on', async run() {
     const { exportDocx, loadScript } = await import('../js/docx.js?t=' + Date.now());
     const { prepare } = await import('../js/docximport.js?t=' + Date.now());
