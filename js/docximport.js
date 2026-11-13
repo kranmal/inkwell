@@ -276,6 +276,26 @@ function mark(doc, comments, notes, sects, charts, smart) {
     }
     if (top && top.parentNode) top.remove();
   }
+  // A tracked change to a cell's shading (w:tcPrChange): mammoth drops cell shading, so the cell's first text carries a marker
+  // with the new and old fill, and finish() turns it into the cell's background plus a mark that Reject can undo.
+  const fillOf = (pr) => { const sh = pr && [...pr.children].find((c) => c.localName === 'shd'), v = sh ? attr(sh, 'fill') : ''; return /^[0-9a-f]{6}$/i.test(v) ? v.toLowerCase() : ''; };
+  for (const tc of kids(doc.documentElement, 'tc')) {
+    const pr = [...tc.children].find((c) => c.localName === 'tcPr'), ch = pr && [...pr.children].find((c) => c.localName === 'tcPrChange');
+    if (!ch) continue;
+    const was = fillOf([...ch.children].find((c) => c.localName === 'tcPr')), now = fillOf(pr);
+    if (was === now) continue;
+    let t = kids(tc, 't')[0];
+    if (!t) {                                   // an empty cell: give the mark something to wrap
+      const p0 = kids(tc, 'p')[0];
+      if (!p0) continue;
+      const r = doc.createElementNS(W, 'w:r');
+      t = doc.createElementNS(W, 'w:t');
+      t.textContent = '\u200b';
+      r.append(t); p0.append(r);
+    }
+    t.setAttribute('xml:space', 'preserve');
+    t.textContent = `${O}K|${enc(attr(ch, 'author'))}|${Date.parse(attr(ch, 'date')) || Date.now()}|${enc(was)}|${enc(now)}${M}${t.textContent}${C}`;
+  }
   const walk = (el) => {
     for (const n of [...el.childNodes]) {
       if (n.nodeType !== 1) continue;
@@ -385,6 +405,10 @@ function unmark(html, comments, notes) {
         const was = dec(f[4]) + sty(dec(f[7] || ''), plain) + dec(f[5]);
         return `<span class="fc" data-author="${esc(dec(f[1]))}" data-time="${esc(f[2])}" data-label="${esc(dec(f[3]))}" data-was="${esc(was)}" data-lift="1">${sty(dec(f[6] || ''), body)}</span>`;
       }
+      if (f[0] === 'K') {       // a tracked cell shading change: the old fill goes in the mark, the new one is applied to the cell in finish()
+        const wasFill = dec(f[3]);
+        return `<span class="fc" data-author="${esc(dec(f[1]))}" data-time="${esc(f[2])}" data-label="Cell shading" data-cell-style="${wasFill ? `background-color: #${wasFill};` : ''}" data-new-bg="${esc(dec(f[4]))}"${body === '\u200b' ? ' data-pad="1"' : ''}>${body}</span>`;
+      }
       if (f[0] === 'C') {
         const id = dec(f[1]);
         if (!used.has(id)) used.set(id, 'cm' + uid());
@@ -473,6 +497,16 @@ export async function prepare(JSZip, arrayBuffer) {
     if (hf) extra.hf = hf;
     const finish = (html) => {
       html = unmark(html, comments, notes);
+      if (html.includes('data-new-bg')) {
+        const tpl = document.createElement('template');
+        tpl.innerHTML = html;
+        for (const sp of tpl.content.querySelectorAll('span.fc[data-new-bg]')) {
+          const cell = sp.closest('td,th'), bg = sp.getAttribute('data-new-bg');
+          sp.removeAttribute('data-new-bg');
+          if (cell && bg) cell.style.backgroundColor = '#' + bg;
+        }
+        html = tpl.innerHTML;
+      }
       // Note lists go at the end, in reference order.
       for (const [kind, cls] of [['f', 'footnotes'], ['e', 'endnotes']]) {
         const mine = refs.filter((r) => r.kind === kind);
