@@ -260,8 +260,11 @@ function applyTheme() {
   $$('.theme-card').forEach((c) => c.classList.toggle('on', c.dataset.val === (doc.theme || 'modern')));
   stylesMod.apply();
 }
-function zoomTo(z) {
-  prefs.zoom = Math.max(50, Math.min(200, Math.round(z / 5) * 5));
+// The zoom that fits the page to the window width, never above 100%. On a phone this is what you start with.
+const fitZoom = () => Math.max(25, Math.min(100, Math.floor(((canvas.clientWidth - (canvas.clientWidth < 600 ? 16 : 48)) / (pagesMod.pageWidthMm() * MM)) * 20) * 5));
+function zoomTo(z, manual = true) {
+  if (manual) prefs.zoomFit = false;
+  prefs.zoom = Math.max(25, Math.min(200, Math.round(z / 5) * 5));
   page.style.zoom = prefs.zoom === 100 ? '' : zoomF();
   $$('.zoom-label').forEach((l) => { l.textContent = prefs.zoom + '%'; });
   $('#zoom-range').value = prefs.zoom;
@@ -1157,7 +1160,7 @@ function run(cmd, val, el) {
     case 'zoomIn': zoomTo(prefs.zoom + 10); break;
     case 'zoomOut': zoomTo(prefs.zoom - 10); break;
     case 'zoom': zoomTo(Number(val) || 100); break;
-    case 'zoomFit': zoomTo(Math.floor(((canvas.clientWidth - 48) / (pagesMod.pageWidthMm() * MM)) * 20) * 5); break;
+    case 'zoomFit': prefs.zoomFit = true; zoomTo(fitZoom(), false); break;
     case 'print': $('#backstage').hidden = true; window.print(); break;
     case 'backstage': toggleBackstage(); break;
     case 'new': createDoc('Untitled document', ''); break;
@@ -1344,7 +1347,40 @@ editor.addEventListener('drop', (e) => {
   files.reduce((p, f) => p.then(() => insertImageFile(f, r && inEditor(r.startContainer) ? r : null)), Promise.resolve());
 });
 canvas.addEventListener('mousedown', (e) => { if (e.target === canvas || e.target === page) { selectImg(null); } });
-window.addEventListener('resize', () => { closeMenus(); pagesMod.layout(); placeImgBox(); });
+window.addEventListener('resize', () => { closeMenus(); if (prefs.zoomFit && fitZoom() !== prefs.zoom) zoomTo(fitZoom(), false); else { pagesMod.layout(); placeImgBox(); } });
+
+// ---------- touch ----------
+// Pinch with two fingers to zoom the page.
+{
+  let d0 = 0, z0 = 100, busy = false;
+  const dist = (t) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+  canvas.addEventListener('touchstart', (e) => { if (e.touches.length === 2) { d0 = dist(e.touches); z0 = prefs.zoom; } }, { passive: true });
+  canvas.addEventListener('touchmove', (e) => {
+    if (e.touches.length !== 2 || !d0) return;
+    e.preventDefault();
+    if (busy) return;
+    const z = Math.max(25, Math.min(200, Math.round((z0 * dist(e.touches)) / d0 / 5) * 5));
+    if (z === prefs.zoom) return;
+    busy = true;
+    requestAnimationFrame(() => { zoomTo(z); busy = false; });
+  }, { passive: false });
+  canvas.addEventListener('touchend', (e) => { if (e.touches.length < 2) d0 = 0; }, { passive: true });
+}
+// Some touch browsers never send double-click events; send one after a quick double tap so
+// objects, charts, headers and footers can still be opened for editing.
+{
+  let lastTap = 0, lastX = 0, lastY = 0, native = 0;
+  document.addEventListener('dblclick', (e) => { if (e.isTrusted) native = Date.now(); }, true);
+  document.addEventListener('pointerup', (e) => {
+    if (e.pointerType !== 'touch') return;
+    const now = Date.now();
+    if (now - lastTap < 320 && Math.hypot(e.clientX - lastX, e.clientY - lastY) < 24) {
+      const t = e.target, at = now;
+      lastTap = 0;
+      setTimeout(() => { if (native < at) t.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true, clientX: e.clientX, clientY: e.clientY, view: window })); }, 80);
+    } else { lastTap = now; lastX = e.clientX; lastY = e.clientY; }
+  }, true);
+}
 editor.addEventListener('load', () => { pagesMod.layout(); placeImgBox(); }, true);
 
 document.addEventListener('keydown', (e) => {
@@ -1475,7 +1511,8 @@ async function start() {
     setDoc(newDoc(count ? 'Untitled document' : 'Welcome to Inkwell'), html);
     if (html) save();
   }
-  zoomTo(prefs.zoom);
+  if (prefs.zoomFit === undefined) prefs.zoomFit = prefs.zoom === 100;
+  if (prefs.zoomFit) zoomTo(fitZoom(), false); else zoomTo(prefs.zoom, false);
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { pagesMod.layout(); placeImgBox(); });
   matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyDark);
 }
