@@ -693,6 +693,19 @@ const tests = [
       await sleep(250);
       if (/<(strong|b)>\s*me/.test(ed.innerHTML) || !/Format me please/.test(ed.textContent)) f.push('rejecting did not give back the plain words: ' + ed.innerHTML.slice(0, 300));
     }
+    // the cell shading change comes back as a mark on the cell, with the new fill applied and the old one restorable
+    const cellMark = box.querySelector('td span.fc[data-cell-style]'), cell = cellMark && cellMark.closest('td');
+    if (!cellMark) f.push('the cell shading change did not come back: ' + box.querySelector('table').outerHTML.slice(0, 400));
+    else {
+      if (!/shading/i.test(cellMark.dataset.label) || cellMark.dataset.author !== 'Compare') f.push('cell mark details lost: ' + cellMark.outerHTML);
+      if (cellMark.hasAttribute('data-new-bg') || !/rgb\(0, 255, 255\)|#0ff/i.test(cell.getAttribute('style') || '')) f.push('new fill not on the cell: ' + cell.outerHTML);
+      if (!/rgb\(255, 255, 0\)|#ffff00|#ff0/i.test(cellMark.dataset.cellStyle)) f.push('old fill not kept: ' + cellMark.dataset.cellStyle);
+      await load(box.innerHTML);
+      D.querySelector('[data-cmd="rejectAll"]').click();
+      await sleep(250);
+      const back = ed.querySelector('td:nth-child(2)');
+      if (!back || !/rgb\(255, 255, 0\)|#ffff00|#ff0/i.test(back.getAttribute('style') || '') || ed.querySelector('td span.fc')) f.push('rejecting did not restore the yellow shading: ' + (back && back.outerHTML));
+    }
     // and a change that removes bold comes back with the bold as its old look
     const x2 = await exportDocx(Object.assign(document.createElement('div'), { innerHTML: '<p>Is <span class="fc" data-author="Sam" data-time="1" data-label="Bold" data-was="&lt;b&gt;this&lt;/b&gt;">this</span> bold?</p>' }), { title: 't', page: { w: 210, h: 297, m: { t: 25, r: 25, b: 25, l: 25 } } });
     const r2 = await prepare(JSZip, await x2.arrayBuffer());
