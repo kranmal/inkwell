@@ -5,7 +5,7 @@ import { versionsOf } from './docs.js';
 
 let api;
 const LEAF = 'p,h1,h2,h3,h4,h5,h6,li,pre,blockquote,td,th';
-const SKIP = '.toc,.index,.biblio,.chart,.shape,.eq,.smartart,.textbox,.wordart,.page-break,.sect-break,.rep-head';
+const SKIP = '.toc,.index,.biblio,.chart,.shape,.eq,.smartart,.textbox,.wordart,.page-break,.sect-break';
 const NOTELIST = 'ol.footnotes,ol.endnotes';
 const OBJ = '.fn-ref,.en-ref,.cap-num,.xref,.cite,.eq,.mfield,.tf,.idx,.wordart,.smartart,.shape,.chart,img,svg';
 const MAX_CELLS = 20e6;
@@ -271,6 +271,44 @@ function markObjects(A, B, time, st, home) {
   }
 }
 
+// ---------- table formatting ----------
+// Shading, alignment, borders, a repeating header row and column widths are looks of the table, not text. Each difference
+// becomes a formatting change (span.fc) in the first cell it concerns, holding the old value so Reject puts it back.
+const TB_CLASSES = ['tb-none', 'tb-outer', 'tb-horizontal', 'tb-striped', 'rep-head'];
+const tblClass = (t) => TB_CLASSES.filter((c) => t.classList.contains(c)).join(' ');
+const colsOf = (t) => [...t.querySelectorAll(':scope > colgroup > col')].map((c) => parseFloat(c.style.width) || 0);
+const sameCols = (x, y) => x.length === y.length && x.every((v, i) => Math.abs(v - y[i]) < 1.5);
+const CELL_LOOKS = [['backgroundColor', 'shading'], ['textAlign', 'alignment'], ['verticalAlign', 'vertical alignment']];
+function markTableLooks(ops, a, b, time) {
+  const seenCell = new Set(), seenTable = new Set();
+  const put = (cell, label, extra) => {
+    const host = [...cell.children].find((c) => c.matches(LEAF)) || cell;
+    const w = document.createElement('span');
+    w.className = 'fc'; w.dataset.author = AUTHOR; w.dataset.time = String(time); w.dataset.label = label;
+    Object.assign(w.dataset, extra);
+    if (host.firstChild) w.append(...host.childNodes); else { w.textContent = '\u200b'; w.dataset.pad = '1'; }
+    host.append(w);
+  };
+  let n = 0;
+  for (const op of ops) {
+    if ((op.t !== 'eq' && op.t !== 'mod') || op.o === undefined || op.n === undefined) continue;
+    const ca = a[op.o].closest('td,th'), cb = b[op.n].closest('td,th');
+    if (!ca || !cb || seenCell.has(cb)) continue;
+    seenCell.add(cb);
+    const ta = ca.closest('table'), tb = cb.closest('table');
+    if (ta && tb && !seenTable.has(tb)) {
+      seenTable.add(tb);
+      const labels = [], extra = {};
+      if (tblClass(ta) !== tblClass(tb)) { labels.push('table borders or header row'); extra.tableClass = ta.className; }
+      if (!sameCols(colsOf(ta), colsOf(tb)) && colsOf(ta).length && colsOf(tb).length) { labels.push('column widths'); extra.tableCols = ta.querySelector(':scope > colgroup') ? ta.querySelector(':scope > colgroup').outerHTML : ''; }
+      if (labels.length) { put(cb, 'Table: ' + labels.join(', '), extra); n++; }
+    }
+    const diff = CELL_LOOKS.filter(([k]) => (ca.style[k] || '') !== (cb.style[k] || '')).map(([, l]) => l);
+    if (diff.length) { put(cb, 'Cell ' + diff.join(', '), { cellStyle: ca.getAttribute('style') || '' }); n++; }
+  }
+  return n;
+}
+
 // ---------- comments ----------
 // Comments are data on the text, not text, so they are not tracked changes. A comment that is new stays as it is,
 // one whose text changed gets the old text added to it, and one that was removed comes back as a Compare comment
@@ -435,6 +473,7 @@ export function diffHtml(oldHtml, newHtml) {
       st.removed++;
     }
   });
+  st.formatted += markTableLooks(ops, a, b, time);
   st.comments = markComments(A, B, time, (sp) => { const l = sp.closest(LEAF); return l ? mappedA(l) : null; });
   markObjects(A, B, time, st, (o) => {
     const mapped = mappedA;
