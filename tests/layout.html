@@ -1016,6 +1016,28 @@ const tests = [
     if (right && right.previousElementSibling && !/Host one/.test(right.previousElementSibling.textContent)) f.push('the floating box should follow Host one, ahead of its own (empty) anchor paragraph: ' + box.innerHTML.slice(0, 300));
     return { fail: f, info: tbs.length + ' boxes' };
   } },
+  { name: 'A text box keeps its fill and outline through a Word round trip', async run() {
+    const { exportDocx, loadScript } = await import('../js/docx.js?t=' + Date.now());
+    const { prepare } = await import('../js/docximport.js?t=' + Date.now());
+    const JSZip = await loadScript('../vendor/jszip.min.js', 'JSZip');
+    const mammoth = await loadScript('../vendor/mammoth.browser.min.js', 'mammoth');
+    const f = [], root = document.createElement('div');
+    root.innerHTML = '<p>Intro</p><div class="textbox" style="width:240px;background-color:#ffee99;border:3px solid #cc0000"><p>Boxed</p></div><div class="textbox" style="width:240px;border:none"><p>Bare</p></div><div class="textbox" style="width:240px"><p>Plain</p></div>';
+    document.body.append(root);
+    const buf = await (await exportDocx(root, { title: 't', page: { w: 210, h: 297, m: { t: 25, r: 25, b: 25, l: 25 } } })).arrayBuffer();
+    root.remove();
+    const rich = await prepare(JSZip, buf);
+    const box = document.createElement('div');
+    box.innerHTML = rich.finish((await mammoth.convertToHtml({ arrayBuffer: rich.buffer })).value);
+    const tbs = [...box.querySelectorAll('.textbox')];
+    if (tbs.length !== 3) return { fail: ['expected 3 text boxes, got ' + tbs.length] };
+    const [a1, b1, c1] = tbs;
+    if (!/background-color:\s*#ffee99/i.test(a1.getAttribute('style') || '')) f.push('fill lost: ' + a1.getAttribute('style'));
+    if (!/border:\s*3px solid #cc0000/i.test(a1.getAttribute('style') || '')) f.push('outline lost: ' + a1.getAttribute('style'));
+    if (!/border:\s*none/i.test(b1.getAttribute('style') || '')) f.push('no-outline lost: ' + b1.getAttribute('style'));
+    if (/border/.test(c1.getAttribute('style') || '') && !/border:\s*1px solid #9a9a9a/.test(c1.getAttribute('style'))) f.push('plain box gained a border: ' + c1.getAttribute('style'));
+    return { fail: f, info: tbs.map((t) => t.getAttribute('style')).join(' | ') };
+  } },
   { name: 'A cell that changed both shading and merge says so in its label after a Word round trip', async run() {
     const { diffHtml } = await import('../js/compare.js?t=' + Date.now());
     const { exportDocx, loadScript } = await import('../js/docx.js?t=' + Date.now());
