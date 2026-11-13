@@ -285,7 +285,24 @@ function liftOut(el) {
 }
 // Gives a cell back its old span: a cell that was merged is split into empty cells, one that was split is merged again
 // (the text of the cells it swallows moves into it, as with Merge cells). Does nothing if the new span would cut across another merged cell.
-function setSpan(cell, cs, rs) {
+// The text a merge swallowed is also in the merged cell, as a tracked deletion (or as plain text once that is rejected): take it out
+// of there, since it goes back into its own cell.
+function takeBack(cell, html) {
+  const want = Object.assign(document.createElement('div'), { innerHTML: html }).textContent.trim();
+  if (!want) return;
+  for (const d of cell.querySelectorAll('del')) if (d.textContent.trim() === want) { d.remove(); return; }
+  let left = want.length;
+  const walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT), nodes = [];
+  while (walker.nextNode()) nodes.push(walker.currentNode);
+  if (!cell.textContent.trimEnd().endsWith(want)) return;
+  for (let i = nodes.length - 1; i >= 0 && left > 0; i--) {
+    const t = nodes[i], txt = t.data.trimEnd(), cut = Math.min(left, txt.length);
+    t.data = txt.slice(0, txt.length - cut);
+    left -= cut;
+  }
+  cell.innerHTML = cell.innerHTML.replace(/(\s|&nbsp;)+$/, '');
+}
+function setSpan(cell, cs, rs, parts) {
   const table = cell.closest('table');
   let g = gridOf(table), p = g.pos.get(cell);
   if (!p || (p.cs === cs && p.rs === rs)) return;
@@ -299,7 +316,8 @@ function setSpan(cell, cs, rs) {
         const tr = g.rows[r];
         let before = null;
         for (const x of tr.cells) { const q = g.pos.get(x); if (q.c > c) { before = x; break; } }
-        const n = document.createElement(tag); n.append(document.createElement('br'));
+        const n = document.createElement(tag), kept = parts && parts.find((q) => q[0] === r - p.r && q[1] === c - p.c);
+        if (kept) { n.innerHTML = kept[2]; takeBack(cell, kept[2]); } else n.append(document.createElement('br'));
         tr.insertBefore(n, before);
       }
     }
@@ -330,7 +348,7 @@ function setSpan(cell, cs, rs) {
 function resolveLook(el, accept) {
   if (!accept) {
     const cell = el.closest('td,th'), table = el.closest('table'), d = el.dataset;
-    if (d.cellSpan && cell) { const [cs, rs] = d.cellSpan.split(',').map(Number); setSpan(cell, cs, rs); }
+    if (d.cellSpan && cell) { const [cs, rs] = d.cellSpan.split(',').map(Number); let parts = null; try { parts = d.cellParts ? JSON.parse(d.cellParts) : null; } catch { /* ignore */ } setSpan(cell, cs, rs, parts); }
     if (d.cellStyle !== undefined && cell) { if (d.cellStyle) cell.setAttribute('style', d.cellStyle); else cell.removeAttribute('style'); }
     if (d.tableClass !== undefined && table) { if (d.tableClass) table.className = d.tableClass; else table.removeAttribute('class'); }
     if (d.tableCols !== undefined && table) {

@@ -2,6 +2,7 @@
 // The result opens as a new document with every difference as a tracked change, so it can be
 // accepted, rejected and exported like any other.
 import { versionsOf } from './docs.js';
+import { gridOf } from './tables.js';
 
 let api;
 const LEAF = 'p,h1,h2,h3,h4,h5,h6,li,pre,blockquote,td,th';
@@ -281,6 +282,22 @@ const sameCols = (x, y) => x.length === y.length && x.every((v, i) => Math.abs(v
 const CELL_LOOKS = [['backgroundColor', 'shading'], ['textAlign', 'alignment'], ['verticalAlign', 'vertical alignment'],
   ['borderTop', 'top border'], ['borderRight', 'right border'], ['borderBottom', 'bottom border'], ['borderLeft', 'left border']];
 const spanOf = (c) => `${Math.max(1, c.colSpan || 1)},${Math.max(1, c.rowSpan || 1)}`;
+// When the new cell swallowed old neighbours, what they held, so Reject can put the text back: [row offset, column offset, html] from the old cell.
+function swallowed(ta, ca, cb) {
+  const g = gridOf(ta), p = g.pos.get(ca);
+  if (!p) return '';
+  const out = [], seen = new Set();
+  for (let r = p.r; r < p.r + Math.max(1, cb.rowSpan); r++) {
+    for (let c = p.c; c < p.c + Math.max(1, cb.colSpan); c++) {
+      const x = g.grid[r] && g.grid[r][c];
+      if (!x || x === ca || seen.has(x)) continue;
+      seen.add(x);
+      const q = g.pos.get(x);
+      if (x.textContent.trim()) out.push([q.r - p.r, q.c - p.c, x.innerHTML]);
+    }
+  }
+  return out.length ? JSON.stringify(out) : '';
+}
 function markTableLooks(ops, a, b, time) {
   const seenCell = new Set(), seenTable = new Set();
   const put = (cell, label, extra) => {
@@ -309,7 +326,7 @@ function markTableLooks(ops, a, b, time) {
     // Merged cells: the old span goes in the mark, and Reject merges or splits the cell back.
     const extra = {};
     if (diff.length) extra.cellStyle = ca.getAttribute('style') || '';
-    if (spanOf(ca) !== spanOf(cb)) { diff.push(ca.colSpan * ca.rowSpan > cb.colSpan * cb.rowSpan ? 'split' : 'merged'); extra.cellSpan = spanOf(ca); }
+    if (spanOf(ca) !== spanOf(cb)) { diff.push(ca.colSpan * ca.rowSpan > cb.colSpan * cb.rowSpan ? 'split' : 'merged'); extra.cellSpan = spanOf(ca); const parts = swallowed(ta, ca, cb); if (parts) extra.cellParts = parts; }
     if (diff.length) { put(cb, 'Cell ' + diff.join(', '), extra); n++; }
   }
   return n;
