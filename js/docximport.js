@@ -307,6 +307,8 @@ function mark(doc, comments, notes, sects, charts, smart) {
         if (name === 'delText' || name === 't') {
           let text = n.textContent;
           const wrap = [];
+          const fc = formatChange(n.parentNode);
+          if (fc) wrap.push(fc);
           for (let p = n.parentNode; p && p !== doc; p = p.parentNode) {
             if (p.namespaceURI === W && (p.localName === 'ins' || p.localName === 'del')) {
               wrap.push(`${p.localName === 'ins' && !p.getAttribute('w:inkdel') ? 'I' : 'D'}|${enc(attr(p, 'author'))}|${Date.parse(attr(p, 'date')) || Date.now()}`);
@@ -335,6 +337,27 @@ function mark(doc, comments, notes, sects, charts, smart) {
   return refs;
 }
 
+// A run's tracked formatting change (w:rPrChange) as a marker: who, when, what changed, and the tags the text had before.
+// Only the looks the import keeps are compared: bold, italic, underline, strikethrough, super/subscript.
+const LOOKS = [['b', 'Bold', 'strong'], ['i', 'Italic', 'em'], ['u', 'Underline', 'u'], ['strike', 'Strikethrough', 's']];
+function looksOf(rPr) {
+  const own = (name) => [...rPr.children].filter((c) => c.namespaceURI === W && c.localName === name);
+  const on = (name) => { const e = own(name)[0]; if (!e) return false; const v = attr(e, 'val'); return !(v === '0' || v === 'false' || v === 'none'); };
+  const va = own('vertAlign')[0];
+  return { b: on('b'), i: on('i'), u: on('u'), strike: on('strike') || on('dstrike'), va: va ? attr(va, 'val') : '' };
+}
+function formatChange(run) {
+  if (!run || run.localName !== 'r') return '';
+  const rPr = [...run.children].find((c) => c.localName === 'rPr'), ch = rPr && [...rPr.children].find((c) => c.localName === 'rPrChange');
+  if (!ch) return '';
+  const was = looksOf([...ch.children].find((c) => c.localName === 'rPr') || ch), now = looksOf(rPr);
+  const labels = LOOKS.filter(([k]) => was[k] !== now[k]).map(([, l]) => l);
+  if (was.va !== now.va) labels.push(now.va === 'superscript' || was.va === 'superscript' ? 'Superscript' : 'Subscript');
+  if (!labels.length) return '';
+  const tags = [...LOOKS.filter(([k]) => was[k]).map(([, , t]) => t), ...(was.va === 'superscript' ? ['sup'] : was.va === 'subscript' ? ['sub'] : [])];
+  return `F|${enc(attr(ch, 'author'))}|${Date.parse(attr(ch, 'date')) || Date.now()}|${enc(labels.join(', '))}|${enc(tags.map((t) => `<${t}>`).join(''))}|${enc(tags.reverse().map((t) => `</${t}>`).join(''))}`;
+}
+
 // Turns the markers in mammoth's HTML back into elements.
 function unmark(html, comments, notes) {
   let prev;
@@ -347,6 +370,11 @@ function unmark(html, comments, notes) {
       if (f[0] === 'I' || f[0] === 'D') {
         const tag = f[0] === 'I' ? 'ins' : 'del';
         return `<${tag} class="tc" data-author="${esc(dec(f[1]))}" data-time="${esc(f[2])}">${body}</${tag}>`;
+      }
+      if (f[0] === 'F') {       // a tracked formatting change: the text as it was is kept in data-was
+        const plain = body.replace(/<[^>]*>/g, '');
+        const was = dec(f[4]) + plain + dec(f[5]);
+        return `<span class="fc" data-author="${esc(dec(f[1]))}" data-time="${esc(f[2])}" data-label="${esc(dec(f[3]))}" data-was="${esc(was)}" data-lift="1">${body}</span>`;
       }
       if (f[0] === 'C') {
         const id = dec(f[1]);
