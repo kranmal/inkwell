@@ -290,7 +290,29 @@ function mark(doc, comments, notes, sects, charts, smart) {
     if (fallback || !host) continue;
     const html = kids(tb, 'p').map(paraHtml).map((h) => `<p>${h || '<br>'}</p>`).join('');
     const an = anchorSide(shape);
-    if (html) after(host, `X|${wide}|${enc(html)}|${an.side}`, !!an.side);
+    // The shape's own fill and outline (DrawingML spPr, or VML attributes): '' keeps Inkwell's default look.
+    let fill = '', line = '';
+    const clr = (e) => { const c = e && [...e.children].find((k) => k.localName === 'srgbClr'); const v = c ? c.getAttribute('val') : ''; return /^[0-9a-f]{6}$/i.test(v) ? v.toLowerCase() : ''; };
+    const sp = shape && [...shape.getElementsByTagName('*')].find((e) => e.localName === 'spPr');
+    if (sp) {
+      const fk = [...sp.children].find((k) => k.localName === 'solidFill' || k.localName === 'noFill');
+      if (fk) fill = fk.localName === 'noFill' ? 'none' : clr(fk);
+      const ln = [...sp.children].find((k) => k.localName === 'ln');
+      if (ln) {
+        const lk = [...ln.children].find((k) => k.localName === 'solidFill' || k.localName === 'noFill');
+        const px = Math.max(1, Math.round((parseInt(ln.getAttribute('w'), 10) || 9525) / 9525 * 10) / 10);
+        if (lk && lk.localName === 'noFill') line = 'none';
+        else if (lk && clr(lk)) line = `${px}:${clr(lk)}`;
+      }
+    } else if (shape && shape.localName === 'pict') {
+      const v = [...shape.getElementsByTagName('*')].find((e) => e.getAttribute && (e.getAttribute('fillcolor') || e.getAttribute('strokecolor') || e.getAttribute('stroked')));
+      if (v) {
+        const hx = (x) => (/^#[0-9a-f]{6}$/i.test(x || '') ? x.slice(1).toLowerCase() : '');
+        fill = hx(v.getAttribute('fillcolor')) || (v.getAttribute('filled') === 'f' ? 'none' : '');
+        line = v.getAttribute('stroked') === 'f' ? 'none' : hx(v.getAttribute('strokecolor')) ? `1:${hx(v.getAttribute('strokecolor'))}` : '';
+      }
+    }
+    if (html) after(host, `X|${wide}|${enc(html)}|${an.side}|${fill}|${line}`, !!an.side);
   }
   // Drop the drawings and their VML fallbacks so the text is not read twice.
   for (const tb of kids(doc.documentElement, 'txbxContent')) {
@@ -491,7 +513,7 @@ function unmark(html, comments, notes) {
       }
       if (f[0] === 'S') return `<div class="page-break sect-break" contenteditable="false" data-sect="${esc(dec(f[1]))}"></div>`;
       const floatCss = (side) => (side === 'left' ? 'float:left;margin:4px 14px 8px 0;' : side === 'right' ? 'float:right;margin:4px 0 8px 14px;' : '');
-      if (f[0] === 'X') { const st = (Number(f[1]) > 40 ? `width:${Math.min(Number(f[1]), 720)}px;` : '') + floatCss(f[3]); return `<div class="textbox"${st ? ` style="${st}"` : ''}>${dec(f[2])}</div>`; }
+      if (f[0] === 'X') { const st = (Number(f[1]) > 40 ? `width:${Math.min(Number(f[1]), 720)}px;` : '') + floatCss(f[3]) + (/^[0-9a-f]{6}$/.test(f[4] || '') ? `background-color:#${f[4]};` : '') + (f[5] === 'none' ? 'border:none;' : /^[\d.]+:[0-9a-f]{6}$/.test(f[5] || '') ? `border:${f[5].split(':')[0]}px solid #${f[5].split(':')[1]};` : ''); return `<div class="textbox"${st ? ` style="${st}"` : ''}>${dec(f[2])}</div>`; }
       if (f[0] === 'H') { const st = (f[2] && Number(f[3]) > 40 ? `width:${Math.min(Number(f[3]), 720)}px;` : '') + floatCss(f[2]); return `<figure class="chart" data-chart="${esc(dec(f[1]))}"${st ? ` style="${st}"` : ''} contenteditable="false"></figure>`; }
       if (f[0] === 'G') return `<figure class="smartart" data-sa="${esc(dec(f[1]))}" contenteditable="false"></figure>`;
       if (f[0] === 'N') {
