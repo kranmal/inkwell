@@ -95,6 +95,14 @@ function commentAct(act, id) {
   api.commit();
   if (act === 'resolve') for (const s of spans) { if (s.dataset.resolved) delete s.dataset.resolved; else s.dataset.resolved = '1'; }
   if (act === 'delete') spans.forEach(unwrap);
+  if (act === 'keepnew' || act === 'restoreold') {
+    // settle a Compare comment change: keep the new wording, or go back to the old (a removed comment returns as a normal one)
+    for (const s of spans) {
+      if (act === 'restoreold') { s.dataset.text = s.dataset.was || ''; if (s.dataset.cmp === 'removed' && s.dataset.wasBy) s.dataset.author = s.dataset.wasBy; }
+      else if (s.dataset.cmp === 'changed') s.dataset.text = nowText(s.dataset.text);
+      delete s.dataset.cmp; delete s.dataset.was; delete s.dataset.wasBy;
+    }
+  }
   api.done();
   render(true);
 }
@@ -384,15 +392,26 @@ function collect() {
       const id = el.dataset.cm;
       if (!id || seen.has(id)) continue;
       seen.add(id);
-      out.push({ kind: 'cm', id, el, quote: spansOf(id).map((s) => s.textContent).join(''), text: el.dataset.text || '', author: el.dataset.author || '', time: el.dataset.time, resolved: !!el.dataset.resolved });
+      out.push({ kind: 'cm', id, el, quote: spansOf(id).map((s) => s.textContent).join(''), text: el.dataset.text || '', author: el.dataset.author || '', time: el.dataset.time, resolved: !!el.dataset.resolved, cmp: el.dataset.cmp || '', was: el.dataset.was || '', wasBy: el.dataset.wasBy || '' });
     } else out.push({ kind: el.matches('span.fc') ? 'fc' : el.tagName === 'INS' ? 'ins' : 'del', label: el.dataset.label || '', el, quote: el.textContent, author: el.dataset.author || '', time: el.dataset.time });
   }
   return out;
 }
+// A comment that Compare found changed, added or removed: the old and the new wording side by side, and a choice.
+const nowText = (t) => String(t || '').split('\n(Compare: ')[0];
+function cmpCard(i, n, meta) {
+  const { esc, ic } = api;
+  const head = `<div class="issue-top">${ic('comment')}${meta}</div><p class="issue-ctx"><b>${i.cmp === 'changed' ? 'Comment changed' : i.cmp === 'added' ? 'Comment added' : 'Comment removed'}</b> “${esc(clip(i.quote))}”</p>`;
+  const was = `<p class="rv-body rv-was"><span class="rv-lab">Was${i.wasBy ? ' · ' + esc(i.wasBy) : ''}</span><del>${esc(i.was)}</del></p>`;
+  const btn = (act, label) => `<button class="link-btn" data-act="${act}">${label}</button>`;
+  if (i.cmp === 'changed') return `<div class="issue rv-card" data-n="${n}">${head}${was}<p class="rv-body rv-now"><span class="rv-lab">Now</span><ins>${esc(nowText(i.text))}</ins></p><div class="issue-fix">${btn('keepnew', 'Keep new')}${btn('restoreold', 'Restore old')}</div></div>`;
+  if (i.cmp === 'removed') return `<div class="issue rv-card" data-n="${n}">${head}${was}<div class="issue-fix">${btn('restoreold', 'Bring it back')}${btn('delete', 'Dismiss')}</div></div>`;
+  return `<div class="issue rv-card" data-n="${n}">${head}<p class="rv-body rv-now"><span class="rv-lab">Now</span><ins>${esc(i.text)}</ins></p><div class="issue-fix">${btn('keepnew', 'Keep')}${btn('delete', 'Remove')}</div></div>`;
+}
 function render(force) {
   if (!paneOpen()) return;
   const list = collect();
-  const s = JSON.stringify(list.map((i) => [i.kind, i.id, i.quote, i.text, i.author, i.time, i.resolved, i.label]));
+  const s = JSON.stringify(list.map((i) => [i.kind, i.id, i.quote, i.text, i.author, i.time, i.resolved, i.label, i.cmp, i.was, i.wasBy]));
   if (!force && s === sig) return;
   sig = s; items = list;
   const { esc, ic } = api;
@@ -402,6 +421,7 @@ function render(force) {
   api.$('#rv-empty').hidden = list.length > 0;
   api.$('#rv-list').innerHTML = list.slice(0, 300).map((i, n) => {
     const meta = `<span class="rv-who">${esc(i.author || 'Unknown')}</span><span class="rv-when">${esc(when(i.time))}</span>`;
+    if (i.kind === 'cm' && i.cmp) return cmpCard(i, n, meta);
     if (i.kind === 'cm') {
       return `<div class="issue rv-card${i.resolved ? ' resolved' : ''}" data-n="${n}"><div class="issue-top">${ic('comment')}${meta}</div>`
         + `<p class="issue-ctx">“${esc(clip(i.quote))}”</p><p class="rv-body">${esc(i.text)}</p>`
