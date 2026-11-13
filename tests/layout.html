@@ -463,6 +463,45 @@ const tests = [
     }
     return { fail: f, info: JSON.stringify(r.stats) };
   } },
+  { name: 'Accepting or rejecting one change in the review pane touches only that change', async run() {
+    const { diffHtml } = await import('../js/compare.js?t=' + Date.now());
+    const old = '<p>Alpha one here</p><p>Beta two here</p><p>Gamma three here</p><p>Delta <b>four</b> here</p>';
+    const cur = '<p>Alpha 1 here</p><p>Beta 2 here</p><p>Gamma 3 here</p><p>Delta <b><i>four</i></b> here</p>';
+    const r = diffHtml(old, cur), f = [];
+    await load(r.html);
+    D.querySelector('[data-cmd="reviewPane"]').click();
+    await sleep(300);
+    const cards = () => [...D.querySelectorAll('#rv-list .rv-card')];
+    const marks = () => ed.querySelectorAll('ins.tc,del.tc,span.fc').length;
+    const total = marks();
+    if (total < 7 || cards().length !== total) f.push(`${cards().length} cards for ${total} marks`);
+    const press = async (kind, word, act) => {
+      const c = cards().find((x) => x.querySelector('.issue-ctx').textContent.startsWith(kind) && x.querySelector('.issue-ctx').textContent.includes('“' + word));
+      if (!c) { f.push(`no ${kind} card for ${word}`); return; }
+      const before = marks();
+      c.querySelector(`[data-act="${act}"]`).click();
+      await sleep(150);
+      if (marks() !== before - 1) f.push(`${act} ${word}: ${before} marks became ${marks()}`);
+      if (cards().length !== marks()) f.push(`${act} ${word}: pane shows ${cards().length} cards for ${marks()} marks`);
+    };
+    const text = (i) => ed.children[i].textContent.replace(/\s+/g, ' ').trim();
+    await press('Deleted', 'one', 'accept'); await press('Added', '1', 'accept');
+    await press('Deleted', 'two', 'reject'); await press('Added', '2', 'reject');
+    if (text(0) !== 'Alpha 1 here') f.push('accepted paragraph reads ' + text(0));
+    if (text(1) !== 'Beta two here') f.push('rejected paragraph reads ' + text(1));
+    if (!ed.children[2].querySelector('ins.tc') || !ed.children[2].querySelector('del.tc')) f.push('untouched paragraph lost its marks');
+    if (ed.children[0].querySelector('.tc') || ed.children[1].querySelector('.tc')) f.push('resolved paragraphs still marked');
+    const fc = ed.children[3].querySelector('span.fc');
+    if (!fc) f.push('formatting change missing');
+    else {
+      const c = cards().find((x) => x.querySelector('.issue-ctx').textContent.startsWith('Formatted'));
+      if (!c) f.push('no formatting card'); else { c.querySelector('[data-act="reject"]').click(); await sleep(150); }
+      if (ed.children[3].querySelector('i,em')) f.push('rejected formatting kept italic');
+    }
+    if (marks() !== 2) f.push(marks() + ' marks left, expected the 2 of the untouched paragraph');
+    D.querySelector('[data-cmd="reviewPane"]').click();
+    return { fail: f, info: `${total} changes, 3 resolved one at a time, ${marks()} left` };
+  } },
   { name: 'PDF export has one page per layout page, real text, links and bookmarks', async run() {
     await load(`<h1>Heading one</h1><p>Visit <a href="https://example.com/x">our site</a> and <b>read</b> this.</p><p>${lorem(1200)}</p><h2>Second</h2><p>${lorem(300)}</p>`, 1);
     const pdf = await W.eval(`import('${new URL('../js/pdf.js', location.href).href}')`), pages = (await W.eval(`import('${new URL('../js/pages.js', location.href).href}')`)).count();
