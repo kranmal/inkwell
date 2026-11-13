@@ -233,7 +233,7 @@ async function collect(editor, page, source) {
         let got = null;
         try { got = await source(fam, bold, italic); } catch { got = null; }
         if (!got) continue;
-        const font = parseFont(got.data);
+        const font = parseFont(got.data, got.name);
         if (!font) break;
         const face = { font, used: new Map(), name: got.name || fam, italic, idx: faces.length };
         faces.push(face); faceCache.set(k, face);
@@ -464,11 +464,11 @@ async function assemble(pages, images, bookmarks, faces) {
   for (const f of faces) {
     const { font } = f, sc = 1000 / font.upm;
     const data = font.subset(f.used.keys());
-    const file = await pdf.addStream(`/Length1 ${data.length}`, data);
+    const file = await pdf.addStream(font.cff ? '/Subtype /OpenType' : `/Length1 ${data.length}`, data);
     const base = `${tag(f.idx + 1)}+${String(f.name).replace(/[^A-Za-z0-9-]/g, '') || 'Font'}`;
-    const desc = pdf.add(`<< /Type /FontDescriptor /FontName /${base} /Flags 32 /FontBBox [${font.bbox.map((v) => Math.round(v * sc)).join(' ')}] /ItalicAngle ${f.italic ? -12 : 0} /Ascent ${Math.round(font.ascent * sc)} /Descent ${Math.round(font.descent * sc)} /CapHeight ${Math.round(font.ascent * sc * 0.7)} /StemV 80 /FontFile2 ${file} 0 R >>`);
+    const desc = pdf.add(`<< /Type /FontDescriptor /FontName /${base} /Flags 32 /FontBBox [${font.bbox.map((v) => Math.round(v * sc)).join(' ')}] /ItalicAngle ${f.italic ? -12 : 0} /Ascent ${Math.round(font.ascent * sc)} /Descent ${Math.round(font.descent * sc)} /CapHeight ${Math.round(font.ascent * sc * 0.7)} /StemV 80 /${font.cff ? 'FontFile3' : 'FontFile2'} ${file} 0 R >>`);
     const gs = [...f.used.keys()].sort((a, b) => a - b);
-    const cid = pdf.add(`<< /Type /Font /Subtype /CIDFontType2 /BaseFont /${base} /CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> /FontDescriptor ${desc} 0 R /CIDToGIDMap /Identity /DW 0 /W [${gs.map((g) => `${g} [${Math.round(font.adv(g) * sc)}]`).join(' ')}] >>`);
+    const cid = pdf.add(`<< /Type /Font /Subtype /${font.cff ? 'CIDFontType0' : 'CIDFontType2'} /BaseFont /${base} /CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> /FontDescriptor ${desc} 0 R ${font.cff ? '' : '/CIDToGIDMap /Identity '}/DW 0 /W [${gs.map((g) => `${g} [${Math.round(font.adv(g) * sc)}]`).join(' ')}] >>`);
     const hx = (cp) => (cp > 0xFFFF ? (((cp - 0x10000) >> 10) + 0xD800).toString(16).padStart(4, '0') + (((cp - 0x10000) & 0x3FF) + 0xDC00).toString(16).padStart(4, '0') : cp.toString(16).padStart(4, '0'));
     let cm = '/CIDInit /ProcSet findresource begin 12 dict begin begincmap /CMapName /Adobe-Identity-UCS def /CMapType 2 def 1 begincodespacerange <0000> <FFFF> endcodespacerange\n';
     for (let i = 0; i < gs.length; i += 100) {
