@@ -961,6 +961,38 @@ const tests = [
     }
     return { fail: f, info: tc.length + ' cell changes, ' + marks.length + ' marks' };
   } },
+  { name: 'Anchored text boxes and charts in a Word file float to the side they sit on', async run() {
+    const { exportDocx, loadScript } = await import('../js/docx.js?t=' + Date.now());
+    const { prepare } = await import('../js/docximport.js?t=' + Date.now());
+    const JSZip = await loadScript('../vendor/jszip.min.js', 'JSZip');
+    const mammoth = await loadScript('../vendor/mammoth.browser.min.js', 'mammoth');
+    const cfg = JSON.stringify({ type: 'column', title: 'T', labels: ['a', 'b'], series: [{ name: 'S', values: [1, 2] }] });
+    const root = document.createElement('div'), f = [];
+    root.innerHTML = `<p>Host one</p><div class="textbox" style="width:200px"><p>Box words</p></div><p>Host two</p><figure class="chart" style="width:240px" data-chart='${cfg}'></figure><p>Host three</p><div class="textbox" style="width:200px"><p>Plain box</p></div>`;
+    const zip = await JSZip.loadAsync(await (await exportDocx(root, { title: 't', page: { w: 210, h: 297, m: { t: 25, r: 25, b: 25, l: 25 } } })).arrayBuffer());
+    let xml = await zip.file('word/document.xml').async('string');
+    let n = 0;
+    // The text box becomes anchored on the right and the chart on the left, both wrapped square; the last box stays inline.
+    xml = xml.replace(/<wp:inline [^>]*>([\s\S]*?)<\/wp:inline>/g, (m, inner) => {
+      n++;
+      if (n > 2) return m;
+      const side = n === 1 ? '<wp:align>right</wp:align>' : '<wp:posOffset>0</wp:posOffset>';
+      const body = inner.replace(/(<wp:extent [^>]*\/>)/, '$1<wp:wrapSquare wrapText="bothSides"/>');
+      return `<wp:anchor distT="0" distB="0" distL="0" distR="0" simplePos="0" relativeHeight="0" behindDoc="0" locked="0" layoutInCell="1" allowOverlap="1"><wp:simplePos x="0" y="0"/><wp:positionH relativeFrom="margin">${side}</wp:positionH><wp:positionV relativeFrom="paragraph"><wp:posOffset>0</wp:posOffset></wp:positionV>${body}</wp:anchor>`;
+    });
+    if (n < 3) f.push('expected 3 drawings, found ' + n);
+    zip.file('word/document.xml', xml);
+    const rich = await prepare(JSZip, await zip.generateAsync({ type: 'arraybuffer' }));
+    const box = document.createElement('div');
+    box.innerHTML = rich.finish((await mammoth.convertToHtml({ arrayBuffer: rich.buffer })).value);
+    const tbs = [...box.querySelectorAll('.textbox')], ch = box.querySelector('figure.chart');
+    const right = tbs.find((t) => /Box words/.test(t.textContent)), plain = tbs.find((t) => /Plain box/.test(t.textContent));
+    if (!right || right.style.float !== 'right') f.push('the right-aligned text box should float right: ' + (right && right.outerHTML));
+    if (!ch || ch.style.float !== 'left') f.push('the chart at offset 0 should float left: ' + (ch && ch.outerHTML.slice(0, 160)));
+    if (!plain || plain.style.float) f.push('an inline text box must stay inline');
+    if (right && right.previousElementSibling && !/Host one/.test(right.previousElementSibling.textContent)) f.push('the floating box should follow Host one, ahead of its own (empty) anchor paragraph: ' + box.innerHTML.slice(0, 300));
+    return { fail: f, info: tbs.length + ' boxes' };
+  } },
   { name: 'A cell that changed both shading and merge says so in its label after a Word round trip', async run() {
     const { diffHtml } = await import('../js/compare.js?t=' + Date.now());
     const { exportDocx, loadScript } = await import('../js/docx.js?t=' + Date.now());
