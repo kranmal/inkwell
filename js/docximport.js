@@ -3,7 +3,7 @@
 // Strategy: rewrite word/document.xml so those things survive as private-use marker characters inside
 // ordinary text, let mammoth convert it, then turn the markers back into Inkwell's own elements.
 import { smartConfig } from './docxsmart.js';
-import { PALETTE } from './objects.js';
+import { PALETTE, numFmt } from './objects.js';
 const W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
 const O = '', M = '', C = '';          // open, middle, close markers
 const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -77,6 +77,10 @@ async function sectInfo(zip, docXml) {
     o.landscape = !!sz && (attr(sz, 'orient') === 'landscape' || Number(attr(sz, 'w')) > Number(attr(sz, 'h')));
     const pm = kids(sect, 'pgMar')[0];
     if (pm) { const mm = (k) => Number(attr(pm, k)) / 56.69; o.m = [mm('top'), mm('right'), mm('bottom'), mm('left')]; }
+    const cl = kids(sect, 'cols')[0];
+    o.cols = cl && attr(cl, 'num') !== '' ? Math.max(1, parseInt(attr(cl, 'num'), 10) || 1) : 1;
+    const ty = kids(sect, 'type')[0];
+    o.cont = !!ty && attr(ty, 'val') === 'continuous';
     const pn = kids(sect, 'pgNumType')[0];
     if (pn && attr(pn, 'start') !== '') o.restart = parseInt(attr(pn, 'start'), 10);
     out.push(o);
@@ -87,6 +91,11 @@ async function sectInfo(zip, docXml) {
   return eff;
 }
 
+// Column count and balancing from the section list: Word balances a multi-column section that the next, continuous section follows.
+function columnsOf(sects) {
+  const n = sects && sects.length || 0, cols = n ? sects[0].cols || 1 : 1;
+  return { cols, balance: n > 1 && cols > 1 && sects[n - 1].cont && (sects[n - 1].cols || 1) === 1 && (sects[n - 2].cols || 1) > 1 };
+}
 // What a section break should carry: the settings of the section that starts after it, where they differ.
 const PRESETS = { normal: [25.4, 25.4, 25.4, 25.4], narrow: [12.7, 12.7, 12.7, 12.7], moderate: [25.4, 19.1, 25.4, 19.1], wide: [25.4, 50.8, 25.4, 50.8] };
 function sectData(prev, next) {
@@ -188,6 +197,9 @@ export function chartConfig(doc) {
     const mn = sc && cFirst(sc, 'min'), mx = sc && cFirst(sc, 'max');
     if (mn && isFinite(parseFloat(cVal(mn)))) cfg.valMin = parseFloat(cVal(mn));
     if (mx && isFinite(parseFloat(cVal(mx)))) cfg.valMax = parseFloat(cVal(mx));
+    if (!cKids(main, 'majorGridlines').length) cfg.grid = false;
+    const nfEl = cFirst(main, 'numFmt'), code = nfEl && nfEl.getAttribute('formatCode');
+    if (code && code !== 'General' && !(type === 'stacked100' && code === '0%') && nfEl.getAttribute('sourceLinked') !== '1' && numFmt(code)) cfg.numFmt = code;
   }
   for (const ax of [...plot.children].filter((c) => c.namespaceURI === CNS && /Ax$/.test(c.localName))) {
     const t = words([...ax.children].find((c) => c.localName === 'title'));
@@ -230,6 +242,7 @@ async function readSmart(zip) {
 function mark(doc, comments, notes, sects, charts, smart) {
   const refs = [];                       // note references in document order
   const active = new Set();
+  const balanced = columnsOf(sects).balance;     // the closing one-column continuous section only exists to balance the columns before it
   const after = (host, text, first) => {        // a paragraph holding only a marker, placed right after `host` (or right before it, for a floating object that wraps from its paragraph on)
     const p = doc.createElementNS(W, 'w:p'), r = doc.createElementNS(W, 'w:r'), t = doc.createElementNS(W, 'w:t');
     t.textContent = `${O}${text}${M}${C}`;
@@ -239,7 +252,7 @@ function mark(doc, comments, notes, sects, charts, smart) {
   // Section breaks: each sectPr inside a paragraph ends a section; the break carries the next section's settings.
   if (sects && sects.length > 1) {
     kids(doc.documentElement, 'sectPr').filter((sp) => sp.parentNode.localName === 'pPr').forEach((sp, k) => {
-      if (!sects[k + 1]) return;
+      if (!sects[k + 1] || (balanced && k + 1 === sects.length - 1)) return;
       after(sp.parentNode.parentNode, `S|${enc(JSON.stringify(sectData(sects[k], sects[k + 1])))}`);
     });
   }
@@ -625,6 +638,8 @@ export async function prepare(JSZip, arrayBuffer) {
     const extra = {};
     const hf = await headerFooter(zip).catch(() => null);
     if (hf) extra.hf = hf;
+    const cb = columnsOf(sects);
+    if (cb.cols > 1) extra.page = { cols: Math.min(cb.cols, 3), ...(cb.balance ? { balance: true } : {}) };
     const finish = (html) => {
       html = unmark(html, comments, notes);
       if (html.includes('data-new-bg')) {

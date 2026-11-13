@@ -952,7 +952,7 @@ async function openDoc(id) {
 }
 async function createDoc(title, html, extra = {}) {
   await flush();
-  setDoc({ ...newDoc(title), ...extra }, html);
+  { const base = newDoc(title); setDoc({ ...base, ...extra, ...(extra.page ? { page: { ...base.page, ...extra.page } } : {}) }, html); }
   $('#backstage').hidden = true;
   if (html) await save();
   caretIn(editor.firstElementChild);

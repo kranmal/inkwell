@@ -71,6 +71,15 @@ const x = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(
 const full = new Intl.NumberFormat('en', { maximumFractionDigits: 2 });
 const short = new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 });
 const cut = (s, n) => (s.length > n ? s.slice(0, Math.max(1, n - 1)) + '…' : s);
+// Number format for value-axis labels, from an Excel-style code: optional prefix and suffix text, 0 / 0.00 decimals, a thousands comma, % (x100).
+export function numFmt(code) {
+  const m = /^((?:"[^"]*"|[^0#,."])*)([#,]*0(?:\.0+)?)((?:%|"[^"]*"|[^0#,."%])*)$/.exec(String(code || '').trim());
+  if (!m || /^General$/i.test(code)) return null;
+  const lit = (t) => t.replace(/"/g, '').replace(/\\/g, '');
+  const dec = m[2].includes('.') ? m[2].split('.')[1].length : 0, pct = m[3].includes('%');
+  const nf = new Intl.NumberFormat('en', { minimumFractionDigits: dec, maximumFractionDigits: dec, useGrouping: m[2].includes(',') });
+  return (v) => lit(m[1]) + nf.format(pct ? v * 100 : v) + lit(m[3]);
+}
 const f1 = (n) => Number(n.toFixed(1));
 const lab = (v) => (Math.abs(v) >= 10000 ? short : full).format(v);
 const onCol = (hex) => { const n = parseInt(String(hex).slice(1), 16), f = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }; return 0.2126 * f(n >> 16) + 0.7152 * f((n >> 8) & 255) + 0.0722 * f(n & 255) > 0.35 ? INK : '#fff'; };
@@ -125,6 +134,7 @@ export function renderChart(cfg) {
   const type = TYPES.includes(cfg.type) ? cfg.type : 'column';
   const labels = cfg.labels || [], series = (cfg.series || []).slice(0, MAX_SERIES);
   const title = (cfg.title || '').trim();
+  const gridC = cfg.grid === false ? 'none' : GRID, nfv = numFmt(cfg.numFmt), tickFmt = (t) => (nfv ? nfv(t) : short.format(t));
   let body = '';
   let top = 20;
   const pct100 = type === 'stacked100', dl = !!cfg.dataLabels;
@@ -180,7 +190,7 @@ export function renderChart(cfg) {
       const sx = scale(Math.min(...xs, Infinity) === Infinity ? 0 : Math.min(...xs), Math.max(...xs, -Infinity) === -Infinity ? 1 : Math.max(...xs));
       const L = 56 + pl, R = W - 24, T = top + 8, B = H - 40 - pb;
       const Y = (v) => B - ((v - sc.lo) / (sc.hi - sc.lo)) * (B - T), X = (v) => L + ((v - sx.lo) / (sx.hi - sx.lo)) * (R - L);
-      for (const t of sc.ticks) body += `<line x1="${L}" x2="${R}" y1="${f1(Y(t))}" y2="${f1(Y(t))}" stroke="${GRID}"/><text x="${L - 8}" y="${f1(Y(t) + 4)}" font-size="11" fill="${INK2}" text-anchor="end">${pct100 ? t + '%' : short.format(t)}</text>`;
+      for (const t of sc.ticks) body += `<line x1="${L}" x2="${R}" y1="${f1(Y(t))}" y2="${f1(Y(t))}" stroke="${gridC}"/><text x="${L - 8}" y="${f1(Y(t) + 4)}" font-size="11" fill="${INK2}" text-anchor="end">${pct100 ? t + '%' : tickFmt(t)}</text>`;
       for (const t of sx.ticks) body += `<line x1="${f1(X(t))}" x2="${f1(X(t))}" y1="${T}" y2="${B}" stroke="${GRID}"/><text x="${f1(X(t))}" y="${B + 18}" font-size="11" fill="${INK2}" text-anchor="middle">${short.format(t)}</text>`;
       if (type === 'bubble') {
         const big = Math.max(1e-9, ...bub.flatMap((g) => (g.sz || []).map((v) => Math.abs(v || 0))));
@@ -214,7 +224,7 @@ export function renderChart(cfg) {
       const longest = Math.max(0, ...labels.map((l) => Math.min(l.length, 18)));
       const L = 28 + longest * 6.2 + pl, R = W - 28, T = top + 6, B = H - 34 - pb;
       const X = (v) => L + ((v - sc.lo) / (sc.hi - sc.lo)) * (R - L);
-      for (const t of sc.ticks) body += `<line x1="${f1(X(t))}" x2="${f1(X(t))}" y1="${T}" y2="${B}" stroke="${GRID}"/><text x="${f1(X(t))}" y="${B + 16}" font-size="11" fill="${INK2}" text-anchor="middle">${short.format(t)}</text>`;
+      for (const t of sc.ticks) body += `<line x1="${f1(X(t))}" x2="${f1(X(t))}" y1="${T}" y2="${B}" stroke="${gridC}"/><text x="${f1(X(t))}" y="${B + 16}" font-size="11" fill="${INK2}" text-anchor="middle">${tickFmt(t)}</text>`;
       const band = (B - T) / n, pad = Math.min(10, band * 0.18), bh = Math.max(2, (band - pad * 2 - (m - 1) * 2) / m);
       labels.forEach((l, i) => {
         body += `<text x="${f1(L - 8)}" y="${f1(T + band * i + band / 2 + 4)}" font-size="11" fill="${INK2}" text-anchor="end">${x(cut(l, 18))}</text>`;
@@ -236,7 +246,7 @@ export function renderChart(cfg) {
         body += `<line x1="${R}" x2="${R}" y1="${T}" y2="${B}" stroke="${AXIS}"/>`;
         if (secT) body += `<text transform="rotate(90)" x="${f1((T + B) / 2)}" y="${-(W - 12)}" font-size="12" fill="${INK2}" text-anchor="middle">${x(cut(secT, 50))}</text>`;
       }
-      for (const t of sc.ticks) body += `<line x1="${L}" x2="${R}" y1="${f1(Y(t))}" y2="${f1(Y(t))}" stroke="${GRID}"/><text x="${L - 8}" y="${f1(Y(t) + 4)}" font-size="11" fill="${INK2}" text-anchor="end">${pct100 ? t + '%' : short.format(t)}</text>`;
+      for (const t of sc.ticks) body += `<line x1="${L}" x2="${R}" y1="${f1(Y(t))}" y2="${f1(Y(t))}" stroke="${gridC}"/><text x="${L - 8}" y="${f1(Y(t) + 4)}" font-size="11" fill="${INK2}" text-anchor="end">${pct100 ? t + '%' : tickFmt(t)}</text>`;
       const band = (R - L) / n;
       const every = Math.ceil(n / Math.max(1, Math.floor((R - L) / 64)));
       const maxCh = Math.max(3, Math.floor((band * every) / 6.4));
@@ -291,6 +301,10 @@ function openChart(target) {
   api.$('#ch-labels').checked = !!(cfg && cfg.dataLabels);
   api.$('#ch-cat').value = cfg ? cfg.catTitle || '' : '';
   api.$('#ch-val').value = cfg ? cfg.valTitle || '' : '';
+  api.$('#ch-min').value = cfg && cfg.valMin != null ? cfg.valMin : '';
+  api.$('#ch-max').value = cfg && cfg.valMax != null ? cfg.valMax : '';
+  api.$('#ch-fmt').value = cfg ? cfg.numFmt || '' : '';
+  api.$('#ch-grid').checked = !(cfg && cfg.grid === false);
   api.$('#ch-sec').checked = !!(cfg && cfg.secondary);
   api.$('#ch-sectitle').value = cfg ? cfg.secTitle || '' : '';
   syncSec();
@@ -305,6 +319,13 @@ function applyChart() {
   if (!data) { api.toast('The chart needs a label column and at least one column of numbers.'); return; }
   const cfg = { type: api.$('#ch-type').value, title: api.$('#ch-title').value.trim(), labels: data.labels, series: data.series };
   if (api.$('#ch-labels').checked) cfg.dataLabels = true;
+  if (!api.$('#ch-grid').checked) cfg.grid = false;
+  for (const [id, key] of [['#ch-min', 'valMin'], ['#ch-max', 'valMax']]) { const v = api.$(id).value.trim(); if (v !== '' && isFinite(Number(v))) cfg[key] = Number(v); }
+  const fmtIn = api.$('#ch-fmt').value.trim();
+  if (fmtIn && numFmt(fmtIn)) cfg.numFmt = fmtIn; else if (fmtIn && !/^general$/i.test(fmtIn)) api.toast('That number format is not understood, so the axis keeps its default. Try 0.0, #,##0, $#,##0 or 0%.');
+  // colours set by a Word import (or earlier) stay with their series when the data is edited
+  const old = chartTarget && chartTarget.isConnected ? readCfg(chartTarget) : null;
+  if (old && old.series) cfg.series.forEach((sr, i) => { const o = old.series[i]; if (o && o.color && !sr.color) sr.color = o.color; if (o && o.pointColors && i === 0 && !sr.pointColors) sr.pointColors = o.pointColors; });
   if (api.$('#ch-cat').value.trim()) cfg.catTitle = api.$('#ch-cat').value.trim();
   if (api.$('#ch-val').value.trim()) cfg.valTitle = api.$('#ch-val').value.trim();
   if (cfg.type === 'combo' && api.$('#ch-sec').checked) { cfg.secondary = true; if (api.$('#ch-sectitle').value.trim()) cfg.secTitle = api.$('#ch-sectitle').value.trim(); }
