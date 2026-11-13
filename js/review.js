@@ -462,8 +462,18 @@ export function askPrintView() {
 
 export async function withPrintView(mode, fn) {
   const cls = mode === 'final' || mode === 'original' ? 'pv-' + mode : '';
+  // The original view also gives back the old look of text and tables that only changed in format. That needs the real
+  // Reject, so the page is put back exactly as it was afterwards.
+  let snap = null;
+  if (mode === 'original') {
+    snap = api.editor.innerHTML;
+    for (const el of [...api.editor.querySelectorAll('span.fc')]) if (!el.dataset.hfKey) resolveFormat(el, false);
+  }
   if (cls) { api.editor.classList.add(cls); layout(); }
-  try { return await fn(); } finally { if (cls) { api.editor.classList.remove(cls); layout(); } }
+  try { return await fn(); } finally {
+    if (snap !== null) api.editor.innerHTML = snap;
+    if (cls) { api.editor.classList.remove(cls); layout(); }
+  }
 }
 
 export function init(a) {
