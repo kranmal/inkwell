@@ -530,11 +530,11 @@
   <form method="dialog">
     <h2>Chart</h2>
     <div class="field-row">
-      <label class="field"><span>Type</span><select id="ch-type"><option value="column">Column</option><option value="stacked">Stacked column</option><option value="bar">Bar</option><option value="line">Line</option><option value="area">Area</option><option value="pie">Pie</option><option value="donut">Doughnut</option></select></label>
+      <label class="field"><span>Type</span><select id="ch-type"><option value="column">Column</option><option value="stacked">Stacked column</option><option value="bar">Bar</option><option value="line">Line</option><option value="area">Area</option><option value="combo">Column + lines</option><option value="scatter">Scatter (XY)</option><option value="radar">Radar</option><option value="pie">Pie</option><option value="donut">Doughnut</option></select></label>
       <label class="field grow"><span>Title</span><input id="ch-title" type="text" autocomplete="off" maxlength="80"></label>
     </div>
     <label class="field"><span>Data: first row is the series names, first column is the labels</span><textarea id="ch-data" rows="8" spellcheck="false"></textarea></label>
-    <p class="dlg-note">Separate values with commas or paste straight from a spreadsheet. A pie chart uses the first series.</p>
+    <p class="dlg-note">Separate values with commas or paste straight from a spreadsheet. A pie chart uses the first series, a column + lines chart draws the first series as columns and the rest as lines, and a scatter chart reads the label column as X values.</p>
     <div class="dlg-actions"><span class="spacer"></span><button class="btn" value="cancel">Cancel</button><button class="btn primary" value="ok" id="ch-ok">Insert chart</button></div>
   </form>
 </dialog>
