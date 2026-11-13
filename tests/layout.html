@@ -997,6 +997,20 @@ const tests = [
     if (ed.querySelectorAll('td')[1].hasAttribute('style')) f.push('the neighbour cell changed');
     return { fail: f, info: '' };
   } },
+  { name: 'Rejecting a Compare merge puts the swallowed cell text back', async run() {
+    const { diffHtml } = await import('../js/compare.js?t=' + Date.now());
+    const oldH = '<p>Intro.</p><table><tbody><tr><td>Alpha</td><td>Beta</td></tr><tr><td>C</td><td>D</td></tr></tbody></table>';
+    const newH = '<p>Intro.</p><table><tbody><tr><td colspan="2">Alpha</td></tr><tr><td>C</td><td>D</td></tr></tbody></table>';
+    const f = [];
+    await load(diffHtml(oldH, newH).html);
+    const mark = ed.querySelector('span.fc[data-cell-span]');
+    if (!mark || !/Beta/.test(mark.dataset.cellParts || '')) f.push('the swallowed text is not kept on the mark: ' + (mark && mark.outerHTML));
+    D.querySelector('[data-cmd="rejectAll"]').click();
+    await sleep(250);
+    const row = [...ed.querySelectorAll('tr')[0].cells].map((c) => c.textContent.replace(/\u200b/g, '').trim());
+    if (row.join('|') !== 'Alpha|Beta') f.push('rejecting the merge should give Alpha|Beta, got ' + row.join('|') + ' :: ' + ed.querySelector('table').outerHTML);
+    return { fail: f, info: row.join('|') };
+  } },
   { name: 'Back to 1 column removes every temporary wrapper', async run() {
     await load(longText(), 2); await setCols(1);
     const n = ed.querySelectorAll('.pgs-part').length;
