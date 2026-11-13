@@ -5,7 +5,8 @@ import { versionsOf } from './docs.js';
 
 let api;
 const LEAF = 'p,h1,h2,h3,h4,h5,h6,li,pre,blockquote,td,th';
-const SKIP = '.toc,.index,.biblio,.chart,.shape,.eq,.smartart,.textbox,.wordart,.page-break,.sect-break,.rep-head,ol.footnotes,ol.endnotes';
+const SKIP = '.toc,.index,.biblio,.chart,.shape,.eq,.smartart,.textbox,.wordart,.page-break,.sect-break,.rep-head';
+const NOTELIST = 'ol.footnotes,ol.endnotes';
 const OBJ = '.fn-ref,.en-ref,.cap-num,.xref,.cite,.eq,.mfield,.tf,.idx,.wordart,.smartart,.shape,.chart,img,svg';
 const MAX_CELLS = 20e6;
 const AUTHOR = 'Compare';
@@ -24,7 +25,9 @@ const hash = (str) => { let h = 5381; for (let i = 0; i < str.length; i++) h = (
 const imgSig = (img) => 'img' + hash(img.getAttribute('src') || '');
 // A paragraph's identity: its text plus its pictures, so a replaced or added picture counts as a change.
 // Inline objects (equations, WordArt) are left out of a paragraph's text: they are compared as objects, so a change to one is not a text edit.
-const plain = (el) => { if (!el.querySelector('.eq,.wordart')) return norm(el.textContent); const c = el.cloneNode(true); c.querySelectorAll('.eq,.wordart').forEach((q) => q.remove()); return norm(c.textContent); };
+// Note marks (the 1 in a footnote reference) are left out too: they are renumbered when a note is added or removed, which is not a text edit.
+const INLINE = '.eq,.wordart,.fn-ref,.en-ref';
+const plain = (el) => { if (!el.querySelector(INLINE)) return norm(el.textContent); const c = el.cloneNode(true); c.querySelectorAll(INLINE).forEach((q) => q.remove()); return norm(c.textContent); };
 const sig = (el) => [plain(el), ...[...el.querySelectorAll('img')].map(imgSig)].join(' ').trim();
 const leaves = (root) => [...root.querySelectorAll(LEAF)].filter((el) => !el.closest(SKIP) && !el.querySelector(LEAF) && (norm(el.textContent) || el.querySelector('img,.eq,.wordart')));
 
@@ -268,6 +271,64 @@ function markObjects(A, B, time, st, home) {
   }
 }
 
+// ---------- comments ----------
+// Comments are data on the text, not text, so they are not tracked changes. A comment that is new stays as it is,
+// one whose text changed gets the old text added to it, and one that was removed comes back as a Compare comment
+// on the same words, so nothing is lost. Returns how many comments differ.
+const cmGroups = (root) => {
+  const m = new Map();
+  for (const sp of root.querySelectorAll('span.cm')) { const id = sp.dataset.cm || ''; if (!m.has(id)) m.set(id, []); m.get(id).push(sp); }
+  return [...m.values()].map((spans) => ({ spans, id: spans[0].dataset.cm || '', quote: norm(spans.map((x) => x.textContent).join('')), text: spans[0].dataset.text || '', author: spans[0].dataset.author || '' }));
+};
+function anchorComment(host, quote, make) {
+  const nodes = [];
+  const walk = (n) => { for (const c of n.childNodes) { if (c.nodeType === 3) { if (c.data.trim()) nodes.push(c); } else if (c.nodeType === 1 && !c.matches('del.tc,span.cm') && !c.matches(OBJ)) walk(c); } };
+  walk(host);
+  const first = quote.split(' ')[0];
+  for (const q of [quote, first, '']) {
+    for (const n of nodes) {
+      let i = q ? n.data.indexOf(q) : n.data.search(/\S/), len = q ? q.length : (n.data.match(/\S+/) || [''])[0].length;
+      if (i < 0 || !len) continue;
+      let at = i > 0 ? n.splitText(i) : n;
+      if (len < at.length) at.splitText(len);
+      const sp = make();
+      at.replaceWith(sp); sp.append(at);
+      return true;
+    }
+  }
+  return false;
+}
+function markComments(A, B, time, hostOf) {
+  const a = cmGroups(A), b = cmGroups(B), used = new Set(), pair = new Map();
+  for (const by of [(x, g) => x.id && x.id === g.id, (x, g) => x.quote === g.quote]) {
+    for (const g of b) {
+      if (pair.has(g)) continue;
+      const m = a.find((x) => !used.has(x) && by(x, g));
+      if (m) { used.add(m); pair.set(g, m); }
+    }
+  }
+  let n = 0;
+  for (const g of b) {
+    const m = pair.get(g);
+    if (!m) { n++; continue; }
+    if (m.text !== g.text) { g.spans[0].dataset.text = `${g.text}\n(Compare: this comment was “${m.text}”)`; n++; }
+  }
+  let k = 0;
+  for (const m of a) {
+    if (used.has(m)) continue;
+    const host = hostOf(m.spans[0]);
+    if (!host) continue;
+    const made = anchorComment(host, m.quote, () => {
+      const sp = document.createElement('span');
+      sp.className = 'cm';
+      Object.assign(sp.dataset, { cm: 'cmp' + time.toString(36) + (k++), author: AUTHOR, time: String(time), text: `Deleted comment by ${m.author || 'Unknown'}: ${m.text}` });
+      return sp;
+    });
+    if (made) n++;
+  }
+  return n;
+}
+
 const topOf = (root, el) => { let t = el; while (t.parentElement && t.parentElement !== root) t = t.parentElement; return t; };
 
 // Returns the new document's HTML with every difference from oldHtml marked as a tracked change.
@@ -275,7 +336,7 @@ export function diffHtml(oldHtml, newHtml) {
   const A = parse(oldHtml), B = parse(newHtml), time = Date.now();
   const a = leaves(A), b = leaves(B);
   const ops = pairUp(a, b);
-  const st = { added: 0, removed: 0, edited: 0, formatted: 0, unmarked: 0 };
+  const st = { added: 0, removed: 0, edited: 0, formatted: 0, comments: 0, unmarked: 0 };
   const byOld = new Map(), aIdx = new Map(a.map((e, i) => [e, i]));
   ops.forEach((o) => { if (o.o !== undefined) byOld.set(o.o, o); });
   const delContent = (src) => { const w = mark('del', time); w.textContent = norm(src.textContent); src.querySelectorAll('img').forEach((i) => w.append(i.cloneNode(true))); return w; };
@@ -329,6 +390,23 @@ export function diffHtml(oldHtml, newHtml) {
     doneRows.add(tr);
     return true;
   };
+  const mappedA = (l) => { const i = aIdx.get(l), op = i === undefined ? null : byOld.get(i); return op && op.n !== undefined ? b[op.n] : null; };
+  // A note that was added: its reference in the text is marked as inserted too.
+  const refOf = (root, li) => { const id = li.dataset.fn, cls = li.closest('ol.endnotes') ? 'en-ref' : 'fn-ref'; return id ? [...root.querySelectorAll('sup.' + cls)].find((r) => r.dataset.fn === id && !r.closest('ol')) : null; };
+  // A note that was removed: its reference comes back as a deleted mark at the end of the paragraph it was in, and the note
+  // itself as a deleted entry in the list, so rejecting the deletion restores both. A note whose paragraph is gone is not shown.
+  const ghostNote = (src) => {
+    const ref = refOf(A, src), host = ref && ref.closest(LEAF), at = host && mappedA(host);
+    if (!at) return false;
+    const cls = src.closest('ol.endnotes') ? 'endnotes' : 'footnotes';
+    const id = B.querySelector(`[data-fn="${CSS.escape(src.dataset.fn)}"]`) ? src.dataset.fn + 'x' : src.dataset.fn;
+    const rc = ref.cloneNode(true); rc.dataset.fn = id;
+    const g = mark('del', time); g.append(rc); at.append(g);
+    let list = B.querySelector('ol.' + cls);
+    if (!list) { list = document.createElement('ol'); list.className = cls; const en = B.querySelector(':scope > ol.endnotes'); if (cls === 'footnotes' && en) en.before(list); else B.append(list); }
+    const li = document.createElement('li'); li.dataset.fn = id; li.append(delContent(src)); list.append(li);
+    return true;
+  };
   ops.forEach((op, k) => {
     if (op.t === 'eq') { if (markText(b[op.n], a[op.o], time).fmt) st.formatted++; return; }
     if (op.t === 'mod') {
@@ -339,12 +417,15 @@ export function diffHtml(oldHtml, newHtml) {
       const w = mark('ins', time);
       w.append(...b[op.n].childNodes);
       b[op.n].append(w);
+      if (b[op.n].closest(NOTELIST)) { const ref = refOf(B, b[op.n]); if (ref) { const x = mark('ins', time); ref.replaceWith(x); x.append(ref); } }
       st.added++;
     } else {
       const src = a[op.o];
+      if (src.closest(NOTELIST)) { if (ghostNote(src)) st.removed++; return; }
       if (src.closest('td,th')) { if (delInTable(src, k)) st.removed++; else st.unmarked++; return; }
       const next = ops.slice(k + 1).find((o) => o.n !== undefined);
-      const anchor = next ? b[next.n] : null;
+      let anchor = next ? b[next.n] : null;
+      if (anchor && anchor.closest(NOTELIST)) anchor = topOf(B, anchor);   // a removed paragraph goes before the notes, not among them
       const asLi = src.tagName === 'LI' && anchor && anchor.tagName === 'LI';
       const el = document.createElement(src.tagName === 'LI' && !asLi ? 'p' : src.tagName.toLowerCase());
       if (src.className && !asLi) el.className = src.className;
@@ -354,8 +435,9 @@ export function diffHtml(oldHtml, newHtml) {
       st.removed++;
     }
   });
+  st.comments = markComments(A, B, time, (sp) => { const l = sp.closest(LEAF); return l ? mappedA(l) : null; });
   markObjects(A, B, time, st, (o) => {
-    const mapped = (l) => { const i = aIdx.get(l), op = i === undefined ? null : byOld.get(i); return op && op.n !== undefined ? b[op.n] : null; };
+    const mapped = mappedA;
     const lf = o.closest(LEAF);
     if (lf) { const at = mapped(lf); return at ? { at, how: 'append' } : null; }
     const top = topOf(A, o), leavesIn = (s) => (s.matches(LEAF) ? [s] : [...s.querySelectorAll(LEAF)]);
@@ -369,7 +451,7 @@ export function diffHtml(oldHtml, newHtml) {
     }
     return null;
   });
-  return { html: B.innerHTML, stats: st, changes: st.added + st.removed + st.edited + st.formatted };
+  return { html: B.innerHTML, stats: st, changes: st.added + st.removed + st.edited + st.formatted + st.comments };
 }
 
 const when = (ts) => new Date(ts).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
@@ -411,7 +493,7 @@ async function compare() {
   const d = api.doc;
   await api.createDoc(`Comparison: ${d.title || 'Untitled'}`, res.html, { page: d.page, theme: d.theme, hf: d.hf, styles: d.styles, themeCustom: d.themeCustom, x: d.x });
   const s = res.stats;
-  api.toast(`Compared with ${label}: ${s.added} added, ${s.removed} removed, ${s.edited} edited${s.formatted ? `, ${s.formatted} reformatted` : ''}${s.unmarked ? `; ${s.unmarked} changes in tables, pictures or notes are not marked` : ''}.`);
+  api.toast(`Compared with ${label}: ${s.added} added, ${s.removed} removed, ${s.edited} edited${s.formatted ? `, ${s.formatted} reformatted` : ''}${s.comments ? `, ${s.comments} ${s.comments === 1 ? 'comment' : 'comments'} different` : ''}${s.unmarked ? `; ${s.unmarked} changes in tables or pictures are not marked` : ''}.`);
 }
 
 export function init(a) {
