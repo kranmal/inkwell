@@ -348,8 +348,12 @@ function markComments(A, B, time, hostOf) {
   let n = 0;
   for (const g of b) {
     const m = pair.get(g);
-    if (!m) { n++; continue; }
-    if (m.text !== g.text) { g.spans[0].dataset.text = `${g.text}\n(Compare: this comment was “${m.text}”)`; n++; }
+    if (!m) { for (const sp of g.spans) sp.dataset.cmp = 'added'; n++; continue; }
+    if (m.text !== g.text) {
+      // the note stays in the text too, so it still reads right where the review pane is not shown (Word, say)
+      for (const sp of g.spans) Object.assign(sp.dataset, { cmp: 'changed', was: m.text, wasBy: m.author || '', text: `${g.text}\n(Compare: this comment was “${m.text}”)` });
+      n++;
+    }
   }
   let k = 0;
   for (const m of a) {
@@ -359,7 +363,7 @@ function markComments(A, B, time, hostOf) {
     const made = anchorComment(host, m.quote, () => {
       const sp = document.createElement('span');
       sp.className = 'cm';
-      Object.assign(sp.dataset, { cm: 'cmp' + time.toString(36) + (k++), author: AUTHOR, time: String(time), text: `Deleted comment by ${m.author || 'Unknown'}: ${m.text}` });
+      Object.assign(sp.dataset, { cm: 'cmp' + time.toString(36) + (k++), author: AUTHOR, time: String(time), text: `Deleted comment by ${m.author || 'Unknown'}: ${m.text}`, cmp: 'removed', was: m.text, wasBy: m.author || '' });
       return sp;
     });
     if (made) n++;

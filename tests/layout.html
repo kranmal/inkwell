@@ -573,6 +573,30 @@ const tests = [
     if (!gone || gone.textContent !== 'doomed words') f.push('the removed comment did not come back on its words');
     if (!ed.querySelector('span.cm[data-cm="c3"]')) f.push('the added comment was lost');
     if (r.stats.unmarked) f.push(r.stats.unmarked + ' changes unmarked');
+    // the review pane shows each comment change as old and new wording, with a choice
+    D.querySelector('[data-cmd="reviewPane"]').click();
+    await sleep(300);
+    const cards = [...D.querySelectorAll('#rv-list .rv-card')];
+    const card = (t) => cards.find((c) => c.querySelector('.issue-ctx b') && c.querySelector('.issue-ctx b').textContent === t);
+    const ch = card('Comment changed'), rm = card('Comment removed'), ad = card('Comment added');
+    if (!ch || !/Check this/.test(ch.querySelector('del')?.textContent || '') || ch.querySelector('ins')?.textContent !== 'Check this twice') f.push('the changed comment card does not show was and now: ' + (ch && ch.textContent));
+    if (!rm || !/Remove me/.test(rm.querySelector('del')?.textContent || '')) f.push('the removed comment card is missing its old wording');
+    if (!ad || !/New remark/.test(ad.textContent)) f.push('the added comment card is missing');
+    if (ch) {
+      ch.querySelector('[data-act="restoreold"]').click();
+      await sleep(250);
+      const t = ed.querySelector('span.cm[data-cm="c1"]');
+      if (!t || t.dataset.text !== 'Check this' || t.dataset.cmp || t.dataset.was) f.push('Restore old did not put the old wording back: ' + (t && JSON.stringify(t.dataset)));
+    }
+    const cards2 = [...D.querySelectorAll('#rv-list .rv-card')];
+    const rm2 = cards2.find((c) => c.querySelector('.issue-ctx b')?.textContent === 'Comment removed');
+    if (rm2) {
+      rm2.querySelector('[data-act="restoreold"]').click();
+      await sleep(250);
+      const back = [...ed.querySelectorAll('span.cm')].find((x) => x.dataset.text === 'Remove me');
+      if (!back || back.dataset.author !== 'Sam' || back.dataset.cmp) f.push('Bring it back did not restore the removed comment');
+    }
+    D.querySelector('[data-cmd="reviewPane"]').click();
     // rejecting every change must give back the old notes
     D.querySelector('[data-cmd="rejectAll"]').click();
     await sleep(250);
