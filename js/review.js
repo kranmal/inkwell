@@ -1,5 +1,6 @@
 // Comments and track changes, with a review pane listing both.
 import { resetHf, layout } from './pages.js';
+import { gridOf } from './tables.js';
 let api;
 let pending = null;      // range waiting for a new comment
 let editing = null;      // comment id being edited
@@ -282,10 +283,54 @@ function liftOut(el) {
     if (!a.firstChild) a.remove();
   }
 }
-// A table or cell look from Compare (shading, alignment, borders, widths): Reject puts the old value back.
+// Gives a cell back its old span: a cell that was merged is split into empty cells, one that was split is merged again
+// (the text of the cells it swallows moves into it, as with Merge cells). Does nothing if the new span would cut across another merged cell.
+function setSpan(cell, cs, rs) {
+  const table = cell.closest('table');
+  let g = gridOf(table), p = g.pos.get(cell);
+  if (!p || (p.cs === cs && p.rs === rs)) return;
+  const tag = cell.tagName.toLowerCase(), keepC = Math.min(cs, p.cs), keepR = Math.min(rs, p.rs);
+  if (keepC < p.cs || keepR < p.rs) {
+    cell.colSpan = keepC; cell.rowSpan = keepR;
+    for (let r = p.r; r < p.r + p.rs; r++) {
+      for (let c = p.c; c < p.c + p.cs; c++) {
+        if (r < p.r + keepR && c < p.c + keepC) continue;
+        g = gridOf(table);
+        const tr = g.rows[r];
+        let before = null;
+        for (const x of tr.cells) { const q = g.pos.get(x); if (q.c > c) { before = x; break; } }
+        const n = document.createElement(tag); n.append(document.createElement('br'));
+        tr.insertBefore(n, before);
+      }
+    }
+    g = gridOf(table); p = g.pos.get(cell);
+  }
+  if (cs > p.cs || rs > p.rs) {
+    const r1 = p.r + rs - 1, c1 = p.c + cs - 1, hit = new Set();
+    if (r1 >= g.nRows || c1 >= g.nCols) return;
+    for (let r = p.r; r <= r1; r++) for (let c = p.c; c <= c1; c++) hit.add(g.grid[r][c]);
+    for (const x of hit) { const q = g.pos.get(x); if (q.r < p.r || q.c < p.c || q.r + q.rs - 1 > r1 || q.c + q.cs - 1 > c1) return; }
+    for (const x of hit) {
+      if (x === cell) continue;
+      if (x.textContent.trim()) { if (!cell.textContent.trim()) cell.textContent = ''; else cell.append(document.createElement('br')); cell.append(...x.childNodes); }
+      x.remove();
+    }
+    cell.colSpan = cs; cell.rowSpan = rs;
+    for (const tr of [...table.rows]) {
+      if (tr.cells.length) continue;
+      const g2 = gridOf(table), R = g2.rows.indexOf(tr), seen = new Set();
+      for (const x of g2.grid[R]) if (x && !seen.has(x)) { seen.add(x); if (x.rowSpan > 1) x.rowSpan -= 1; }
+      tr.remove();
+    }
+  }
+  if (cell.colSpan === 1) cell.removeAttribute('colspan');
+  if (cell.rowSpan === 1) cell.removeAttribute('rowspan');
+}
+// A table or cell look from Compare (shading, alignment, borders, merging, widths): Reject puts the old value back.
 function resolveLook(el, accept) {
   if (!accept) {
     const cell = el.closest('td,th'), table = el.closest('table'), d = el.dataset;
+    if (d.cellSpan && cell) { const [cs, rs] = d.cellSpan.split(',').map(Number); setSpan(cell, cs, rs); }
     if (d.cellStyle !== undefined && cell) { if (d.cellStyle) cell.setAttribute('style', d.cellStyle); else cell.removeAttribute('style'); }
     if (d.tableClass !== undefined && table) { if (d.tableClass) table.className = d.tableClass; else table.removeAttribute('class'); }
     if (d.tableCols !== undefined && table) {
@@ -324,7 +369,7 @@ function resolveHf(el, accept) {
 function resolveFormat(el, accept) {
   if (!el || !el.isConnected) return;
   if (el.dataset.hfKey) return resolveHf(el, accept);
-  if (el.dataset.cellStyle !== undefined || el.dataset.tableClass !== undefined || el.dataset.tableCols !== undefined) return resolveLook(el, accept);
+  if (el.dataset.cellStyle !== undefined || el.dataset.cellSpan !== undefined || el.dataset.tableClass !== undefined || el.dataset.tableCols !== undefined) return resolveLook(el, accept);
   if (accept) { unwrap(el); return; }
   if (el.dataset.lift) liftOut(el);
   const t = document.createElement('template');

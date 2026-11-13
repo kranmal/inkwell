@@ -278,7 +278,9 @@ const TB_CLASSES = ['tb-none', 'tb-outer', 'tb-horizontal', 'tb-striped', 'rep-h
 const tblClass = (t) => TB_CLASSES.filter((c) => t.classList.contains(c)).join(' ');
 const colsOf = (t) => [...t.querySelectorAll(':scope > colgroup > col')].map((c) => parseFloat(c.style.width) || 0);
 const sameCols = (x, y) => x.length === y.length && x.every((v, i) => Math.abs(v - y[i]) < 1.5);
-const CELL_LOOKS = [['backgroundColor', 'shading'], ['textAlign', 'alignment'], ['verticalAlign', 'vertical alignment']];
+const CELL_LOOKS = [['backgroundColor', 'shading'], ['textAlign', 'alignment'], ['verticalAlign', 'vertical alignment'],
+  ['borderTop', 'top border'], ['borderRight', 'right border'], ['borderBottom', 'bottom border'], ['borderLeft', 'left border']];
+const spanOf = (c) => `${Math.max(1, c.colSpan || 1)},${Math.max(1, c.rowSpan || 1)}`;
 function markTableLooks(ops, a, b, time) {
   const seenCell = new Set(), seenTable = new Set();
   const put = (cell, label, extra) => {
@@ -304,7 +306,11 @@ function markTableLooks(ops, a, b, time) {
       if (labels.length) { put(cb, 'Table: ' + labels.join(', '), extra); n++; }
     }
     const diff = CELL_LOOKS.filter(([k]) => (ca.style[k] || '') !== (cb.style[k] || '')).map(([, l]) => l);
-    if (diff.length) { put(cb, 'Cell ' + diff.join(', '), { cellStyle: ca.getAttribute('style') || '' }); n++; }
+    // Merged cells: the old span goes in the mark, and Reject merges or splits the cell back.
+    const extra = {};
+    if (diff.length) extra.cellStyle = ca.getAttribute('style') || '';
+    if (spanOf(ca) !== spanOf(cb)) { diff.push(ca.colSpan * ca.rowSpan > cb.colSpan * cb.rowSpan ? 'split' : 'merged'); extra.cellSpan = spanOf(ca); }
+    if (diff.length) { put(cb, 'Cell ' + diff.join(', '), extra); n++; }
   }
   return n;
 }
