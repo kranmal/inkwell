@@ -454,6 +454,27 @@ export function diffHtml(oldHtml, newHtml) {
   return { html: B.innerHTML, stats: st, changes: st.added + st.removed + st.edited + st.formatted + st.comments };
 }
 
+// ---------- headers, footers and page numbers ----------
+// These are page settings, not text, so they cannot be tracked changes. The differences are listed in a note at the top of the result
+// (the result itself carries the new settings); delete the note when you have read it.
+const HF_LABELS = { header: 'Header', headerAlign: 'Header alignment', footer: 'Footer', footerAlign: 'Footer alignment', num: 'Page numbers', numFormat: 'Page number style', firstDiff: 'Different first page' };
+const sectsOf = (html) => { const d = document.createElement('div'); d.innerHTML = html; return [...d.querySelectorAll('.sect-break')].map((el) => { try { return JSON.parse(el.dataset.sect || '{}') || {}; } catch { return {}; } }); };
+export function diffPage(oldHf, newHf, oldHtml, newHtml) {
+  const shown = (k, v) => (v === undefined || v === null || v === '' || v === false ? 'none' : v === true ? 'yes' : String(v));
+  const D0 = { headerAlign: 'left', footerAlign: 'left', num: 'none', numFormat: '1' }, out = [], a = { ...D0, ...(oldHf || {}) }, b = { ...D0, ...(newHf || {}) };
+  for (const k of Object.keys(HF_LABELS)) if (shown(k, a[k]) !== shown(k, b[k])) out.push({ what: HF_LABELS[k], was: shown(k, a[k]), now: shown(k, b[k]) });
+  const sa = sectsOf(oldHtml || ''), sb = sectsOf(newHtml || '');
+  for (let i = 0; i < Math.max(sa.length, sb.length); i++) {
+    for (const k of ['header', 'footer']) {
+      const was = shown(k, (sa[i] || {})[k]), now = shown(k, (sb[i] || {})[k]);
+      if (was !== now) out.push({ what: `Section ${i + 2} ${k}`, was, now });
+    }
+  }
+  return out;
+}
+const hfNote = (diffs) => `<blockquote data-compare-note="1"><p><b>Header and footer changes found by Compare</b> (page settings are not tracked changes; this result uses the new ones. Delete this note when you have read it.)</p>${diffs.map((d) => `<p>${esc(d.what)}: “${esc(d.was)}” → “${esc(d.now)}”</p>`).join('')}</blockquote>`;
+const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+
 const when = (ts) => new Date(ts).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 
 async function compare() {
@@ -479,21 +500,23 @@ async function compare() {
     dlg.showModal();
   });
   if (!pick) return;
-  let other, label;
+  let other, label, otherHf = null;
   try {
-    if (pick.file) { const f = await api.fileToHtml(pick.file); other = f.html; label = pick.file.name; } else {
+    if (pick.file) { const f = await api.fileToHtml(pick.file); other = f.html; label = pick.file.name; otherHf = (f.extra && f.extra.hf) || null; } else {
       const v = versions.find((x) => x.vid === pick.vid);
       if (!v) { api.toast('Choose a version or a file to compare with.'); return; }
-      other = v.html; label = (v.name || 'version') + ' ' + when(v.ts);
+      other = v.html; label = (v.name || 'version') + ' ' + when(v.ts); otherHf = v.hf || null;
     }
   } catch { api.toast('Sorry, that file could not be read.'); return; }
   let res;
   try { res = diffHtml(other, api.editor.innerHTML); } catch { api.toast('These documents are too large to compare.'); return; }
-  if (!res.changes && !res.stats.unmarked) { api.toast('No differences found.'); return; }
   const d = api.doc;
+  const pg = diffPage(otherHf, d.hf, other, api.editor.innerHTML);
+  if (!res.changes && !res.stats.unmarked && !pg.length) { api.toast('No differences found.'); return; }
+  if (pg.length) res.html = hfNote(pg) + res.html;
   await api.createDoc(`Comparison: ${d.title || 'Untitled'}`, res.html, { page: d.page, theme: d.theme, hf: d.hf, styles: d.styles, themeCustom: d.themeCustom, x: d.x });
   const s = res.stats;
-  api.toast(`Compared with ${label}: ${s.added} added, ${s.removed} removed, ${s.edited} edited${s.formatted ? `, ${s.formatted} reformatted` : ''}${s.comments ? `, ${s.comments} ${s.comments === 1 ? 'comment' : 'comments'} different` : ''}${s.unmarked ? `; ${s.unmarked} changes in tables or pictures are not marked` : ''}.`);
+  api.toast(`Compared with ${label}: ${s.added} added, ${s.removed} removed, ${s.edited} edited${s.formatted ? `, ${s.formatted} reformatted` : ''}${s.comments ? `, ${s.comments} ${s.comments === 1 ? 'comment' : 'comments'} different` : ''}${pg.length ? `, ${pg.length} header, footer or page-number ${pg.length === 1 ? 'setting' : 'settings'} different (listed at the top)` : ''}${s.unmarked ? `; ${s.unmarked} changes in tables or pictures are not marked` : ''}.`);
 }
 
 export function init(a) {

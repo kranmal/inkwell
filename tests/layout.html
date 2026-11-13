@@ -581,6 +581,21 @@ const tests = [
     else if (!/1999/.test(left[0]) || !/deleted/.test(left[1])) f.push('rejected notes read ' + JSON.stringify(left));
     return { fail: f, info: JSON.stringify(r.stats) };
   } },
+  { name: 'Compare lists changed headers, footers, page numbers and section headers', async run() {
+    const { diffPage } = await import('../js/compare.js?t=' + Date.now());
+    const f = [];
+    const sect = (o) => `<hr class="sect-break" data-sect='${JSON.stringify(o)}'>`;
+    const d = diffPage({ header: 'Draft', footer: 'Acme', num: 'bottom-center' }, { header: 'Final', footer: 'Acme', num: 'bottom-right', headerAlign: 'center' }, '<p>a</p>' + sect({ header: 'Old' }), '<p>a</p>' + sect({ header: 'New' }));
+    const has = (w, was, now) => d.some((x) => x.what === w && x.was === was && x.now === now);
+    if (!has('Header', 'Draft', 'Final')) f.push('header change missing');
+    if (!has('Page numbers', 'bottom-center', 'bottom-right')) f.push('page number change missing');
+    if (!has('Header alignment', 'left', 'center')) f.push('alignment change missing');
+    if (!has('Section 2 header', 'Old', 'New')) f.push('section header change missing');
+    if (d.some((x) => x.what === 'Footer')) f.push('unchanged footer reported');
+    if (diffPage({ header: 'X' }, { header: 'X', headerAlign: 'left' }, '', '').length) f.push('defaults reported as a change');
+    if (diffPage(null, {}, '', '').length) f.push('empty settings reported as a change');
+    return { fail: f, info: d.length + ' differences' };
+  } },
   { name: 'PDF export has one page per layout page, real text, links and bookmarks', async run() {
     await load(`<h1>Heading one</h1><p>Visit <a href="https://example.com/x">our site</a> and <b>read</b> this.</p><p>${lorem(1200)}</p><h2>Second</h2><p>${lorem(300)}</p>`, 1);
     const pdf = await W.eval(`import('${new URL('../js/pdf.js', location.href).href}')`), pages = (await W.eval(`import('${new URL('../js/pages.js', location.href).href}')`)).count();
