@@ -60,7 +60,7 @@ function insertTextbox() {
 }
 
 // ---------- charts ----------
-export const TYPES = ['column', 'stacked', 'stacked100', 'bar', 'line', 'area', 'combo', 'scatter', 'radar', 'pie', 'donut'];
+export const TYPES = ['column', 'stacked', 'stacked100', 'bar', 'line', 'area', 'combo', 'scatter', 'bubble', 'radar', 'pie', 'donut'];
 export const MAX_SERIES = 12;
 export const PALETTE = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#6250d6', '#e34948', '#17a2b8', '#8a5a2b', '#7a8b99', '#c2185b'];
 const OTHER = '#9a9a9a', INK = '#1f1f1f', INK2 = '#5f5f5f', GRID = '#e6e6e6', AXIS = '#bdbdbd';
@@ -157,20 +157,34 @@ export function renderChart(cfg) {
     if (type === 'donut' && parts.length) body += `<circle cx="${cx}" cy="${f1(cy)}" r="${f1(R * 0.55)}" fill="#fff"/>`;
     if (!parts.length) body += `<text x="${W / 2}" y="${H / 2}" font-size="13" fill="${INK2}" text-anchor="middle">No positive values to show</text>`;
   } else {
-    if (series.length > 1) { body += legend(series.map((s) => s.name), PALETTE, top + 8); top += 26; }
-    const all = series.flatMap((s) => s.values);
+    // Bubble: series come in pairs (Y, then size); an odd last Y gets one size for every point.
+    const bub = [];
+    if (type === 'bubble') for (let k = 0; k < series.length; k += 2) bub.push({ name: series[k].name, ys: series[k].values, sz: series[k + 1] ? series[k + 1].values : null });
+    const sec = type === 'combo' && !!cfg.secondary && series.length > 1;
+    const secT = sec ? (cfg.secTitle || '').trim() : '';
+    const keys = type === 'bubble' ? bub.map((g) => g.name) : series.map((s) => s.name);
+    if (keys.length > 1) { body += legend(keys, PALETTE, top + 8); top += 26; }
+    const all = type === 'bubble' ? bub.flatMap((g) => g.ys) : sec ? series[0].values : series.flatMap((s) => s.values);
     const stackTot = (i) => series.reduce((a, s) => a + Math.max(0, s.values[i] || 0), 0);
     const hiV = pct100 ? 100 : type === 'stacked' ? Math.max(0, ...labels.map((_, i) => stackTot(i))) : Math.max(0, ...all);
     const sc = scale(Math.min(0, ...all), hiV);
     const n = Math.max(1, labels.length), m = series.length || 1;
-    if (type === 'scatter') {
+    if (type === 'scatter' || type === 'bubble') {
       const xs = labels.map((l, i) => { const v = Number(String(l).replace(/[,\s%£$€]/g, '')); return String(l).trim() !== '' && isFinite(v) ? v : i + 1; });
       const sx = scale(Math.min(...xs, Infinity) === Infinity ? 0 : Math.min(...xs), Math.max(...xs, -Infinity) === -Infinity ? 1 : Math.max(...xs));
       const L = 56 + pl, R = W - 24, T = top + 8, B = H - 40 - pb;
       const Y = (v) => B - ((v - sc.lo) / (sc.hi - sc.lo)) * (B - T), X = (v) => L + ((v - sx.lo) / (sx.hi - sx.lo)) * (R - L);
       for (const t of sc.ticks) body += `<line x1="${L}" x2="${R}" y1="${f1(Y(t))}" y2="${f1(Y(t))}" stroke="${GRID}"/><text x="${L - 8}" y="${f1(Y(t) + 4)}" font-size="11" fill="${INK2}" text-anchor="end">${pct100 ? t + '%' : short.format(t)}</text>`;
       for (const t of sx.ticks) body += `<line x1="${f1(X(t))}" x2="${f1(X(t))}" y1="${T}" y2="${B}" stroke="${GRID}"/><text x="${f1(X(t))}" y="${B + 18}" font-size="11" fill="${INK2}" text-anchor="middle">${short.format(t)}</text>`;
-      series.forEach((s, j) => xs.forEach((xv, i) => { body += `<circle cx="${f1(X(xv))}" cy="${f1(Y(s.values[i] || 0))}" r="5" fill="${PALETTE[j]}" fill-opacity="0.85" stroke="#fff" stroke-width="1.5"><title>${x(s.name)}: (${full.format(xv)}, ${full.format(s.values[i] || 0)})</title></circle>${dtxt(X(xv), Y(s.values[i] || 0) - 9, s.values[i] || 0)}`; }));
+      if (type === 'bubble') {
+        const big = Math.max(1e-9, ...bub.flatMap((g) => (g.sz || []).map((v) => Math.abs(v || 0))));
+        const dots = [];
+        bub.forEach((g, j) => xs.forEach((xv, i) => {
+          const sz = g.sz ? Math.abs(g.sz[i] || 0) : big, r = g.sz ? 4 + 22 * Math.sqrt(sz / big) : 9;
+          dots.push({ r, svg: `<circle cx="${f1(X(xv))}" cy="${f1(Y(g.ys[i] || 0))}" r="${f1(r)}" fill="${PALETTE[j]}" fill-opacity="0.6" stroke="${PALETTE[j]}" stroke-width="1.5"><title>${x(g.name)}: (${full.format(xv)}, ${full.format(g.ys[i] || 0)})${g.sz ? ', size ' + full.format(g.sz[i] || 0) : ''}</title></circle>${dtxt(X(xv), Y(g.ys[i] || 0) + 3.5, g.ys[i] || 0)}` });
+        }));
+        body += dots.sort((a, b) => b.r - a.r).map((d) => d.svg).join('');   // small bubbles stay on top of big ones
+      } else series.forEach((s, j) => xs.forEach((xv, i) => { body += `<circle cx="${f1(X(xv))}" cy="${f1(Y(s.values[i] || 0))}" r="5" fill="${PALETTE[j]}" fill-opacity="0.85" stroke="#fff" stroke-width="1.5"><title>${x(s.name)}: (${full.format(xv)}, ${full.format(s.values[i] || 0)})</title></circle>${dtxt(X(xv), Y(s.values[i] || 0) - 9, s.values[i] || 0)}`; }));
       body += `<line x1="${L}" x2="${R}" y1="${B}" y2="${B}" stroke="${AXIS}"/><line x1="${L}" x2="${L}" y1="${T}" y2="${B}" stroke="${AXIS}"/>`;
       body += axT(L, R, T, B);
     } else if (type === 'radar') {
@@ -207,8 +221,15 @@ export function renderChart(cfg) {
       body += `<line x1="${f1(X(0))}" x2="${f1(X(0))}" y1="${T}" y2="${B}" stroke="${AXIS}"/>`;
       body += axT(L, R, T, B);
     } else {
-      const L = 56 + pl, R = W - 24, T = top + 8, B = H - 40 - pb;
+      const L = 56 + pl, R = W - 24 - (sec ? 40 + (secT ? 16 : 0) : 0), T = top + 8, B = H - 40 - pb;
       const Y = (v) => B - ((v - sc.lo) / (sc.hi - sc.lo)) * (B - T);
+      const sc2 = sec ? scale(Math.min(0, ...series.slice(1).flatMap((s) => s.values)), Math.max(0, ...series.slice(1).flatMap((s) => s.values))) : null;
+      const Y2 = sec ? (v) => B - ((v - sc2.lo) / (sc2.hi - sc2.lo)) * (B - T) : Y;
+      if (sec) {
+        for (const t of sc2.ticks) body += `<text x="${R + 8}" y="${f1(Y2(t) + 4)}" font-size="11" fill="${INK2}" text-anchor="start">${short.format(t)}</text>`;
+        body += `<line x1="${R}" x2="${R}" y1="${T}" y2="${B}" stroke="${AXIS}"/>`;
+        if (secT) body += `<text transform="rotate(90)" x="${f1((T + B) / 2)}" y="${-(W - 12)}" font-size="12" fill="${INK2}" text-anchor="middle">${x(cut(secT, 50))}</text>`;
+      }
       for (const t of sc.ticks) body += `<line x1="${L}" x2="${R}" y1="${f1(Y(t))}" y2="${f1(Y(t))}" stroke="${GRID}"/><text x="${L - 8}" y="${f1(Y(t) + 4)}" font-size="11" fill="${INK2}" text-anchor="end">${pct100 ? t + '%' : short.format(t)}</text>`;
       const band = (R - L) / n;
       const every = Math.ceil(n / Math.max(1, Math.floor((R - L) / 64)));
@@ -229,7 +250,7 @@ export function renderChart(cfg) {
         }));
         if (type === 'combo') series.forEach((s, j) => {
           if (j === 0) return;
-          const pts = labels.map((l, i) => [L + band * i + band / 2, Y(s.values[i] || 0)]);
+          const pts = labels.map((l, i) => [L + band * i + band / 2, Y2(s.values[i] || 0)]);
           body += `<path d="M${pts.map((p) => `${f1(p[0])},${f1(p[1])}`).join('L')}" fill="none" stroke="${PALETTE[j]}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
           if (n <= 24) pts.forEach((p, i) => { body += `<circle cx="${f1(p[0])}" cy="${f1(p[1])}" r="4" fill="${PALETTE[j]}" stroke="#fff" stroke-width="2"><title>${x(labels[i])} · ${x(s.name)}: ${full.format(s.values[i] || 0)}</title></circle>${dtxt(p[0], p[1] - 9, s.values[i] || 0)}`; });
         });
@@ -255,6 +276,7 @@ function draw(fig) {
 function ensureCharts() {
   for (const fig of api.editor.querySelectorAll('figure.chart')) if (!fig.querySelector('svg')) draw(fig);
 }
+const syncSec = () => { const on = api.$('#ch-type').value === 'combo'; api.$('#ch-sec-row').hidden = !on; };
 function openChart(target) {
   chartTarget = target && target.isConnected && target.matches('.chart') ? target : null;
   const cfg = chartTarget ? readCfg(chartTarget) : null;
@@ -263,6 +285,9 @@ function openChart(target) {
   api.$('#ch-labels').checked = !!(cfg && cfg.dataLabels);
   api.$('#ch-cat').value = cfg ? cfg.catTitle || '' : '';
   api.$('#ch-val').value = cfg ? cfg.valTitle || '' : '';
+  api.$('#ch-sec').checked = !!(cfg && cfg.secondary);
+  api.$('#ch-sectitle').value = cfg ? cfg.secTitle || '' : '';
+  syncSec();
   api.$('#ch-data').value = cfg ? toCsv(cfg) : DEMO;
   api.$('#ch-ok').textContent = chartTarget ? 'Update chart' : 'Insert chart';
   const dlg = api.$('#dlg-chart');
@@ -276,6 +301,7 @@ function applyChart() {
   if (api.$('#ch-labels').checked) cfg.dataLabels = true;
   if (api.$('#ch-cat').value.trim()) cfg.catTitle = api.$('#ch-cat').value.trim();
   if (api.$('#ch-val').value.trim()) cfg.valTitle = api.$('#ch-val').value.trim();
+  if (cfg.type === 'combo' && api.$('#ch-sec').checked) { cfg.secondary = true; if (api.$('#ch-sectitle').value.trim()) cfg.secTitle = api.$('#ch-sectitle').value.trim(); }
   if (data.dropped) api.toast('Charts show up to 12 series. The extra columns were left out.');
   if (chartTarget && chartTarget.isConnected) {
     api.commit();
@@ -342,6 +368,7 @@ export function init(a) {
   const sw = $('#m-fill .swatches');
   if (sw) sw.innerHTML = [...PALETTE, ...api.COLORS].map((c) => `<button data-cmd="fill" data-val="${c}" style="background:${c}" title="${c}" aria-label="Fill ${c}"></button>`).join('');
 
+  $('#ch-type').addEventListener('change', syncSec);
   $('#dlg-chart').addEventListener('close', (e) => { if (e.target.returnValue === 'ok') applyChart(); chartTarget = null; });
   editor.addEventListener('dblclick', (e) => { const fig = e.target.closest && e.target.closest('figure.chart'); if (fig) { api.selectImg(fig); openChart(fig); } });
   api.on('meta', ensureCharts);

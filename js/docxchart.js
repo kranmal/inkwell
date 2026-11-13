@@ -31,6 +31,15 @@ function ser(cfg, s, i, colors, kind) {
   return `<c:ser><c:idx val="${i}"/><c:order val="${i}"/><c:tx><c:strRef><c:f>Sheet1!$${L}$1</c:f><c:strCache><c:ptCount val="1"/><c:pt idx="0"><c:v>${esc(s.name)}</c:v></c:pt></c:strCache></c:strRef></c:tx>${sp}${kind === 'bar' ? '<c:invertIfNegative val="0"/>' : ''}${dpt}${dLbls(cfg, kind)}${cat(cfg)}<c:val><c:numRef><c:f>Sheet1!$${L}$2:$${L}$${n + 1}</c:f><c:numCache><c:formatCode>General</c:formatCode><c:ptCount val="${n}"/>${cfg.labels.map((_, k) => `<c:pt idx="${k}"><c:v>${Number(s.values[k]) || 0}</c:v></c:pt>`).join('')}</c:numCache></c:numRef></c:val>${kind === 'line' ? '<c:smooth val="0"/>' : ''}</c:ser>`;
 }
 
+// Bubble series come in pairs: a Y series, then its size series (an odd last Y has equal bubbles).
+function bser(cfg, y, z, k, colors) {
+  const n = cfg.labels.length, L = col(2 * k + 1), S = col(2 * k + 2);
+  const fill = `<a:solidFill><a:srgbClr val="${hex(colors[k % colors.length])}"/></a:solidFill>`;
+  const nums = (f, v) => `<c:numRef><c:f>${f}</c:f><c:numCache><c:formatCode>General</c:formatCode><c:ptCount val="${n}"/>${v.map((q, i) => `<c:pt idx="${i}"><c:v>${q}</c:v></c:pt>`).join('')}</c:numCache></c:numRef>`;
+  const size = z ? nums(`Sheet1!$${S}$2:$${S}$${n + 1}`, z.values.slice(0, n).map((v) => Math.abs(Number(v) || 0))) : `<c:numLit><c:formatCode>General</c:formatCode><c:ptCount val="${n}"/>${cfg.labels.map((_, i) => `<c:pt idx="${i}"><c:v>1</c:v></c:pt>`).join('')}</c:numLit>`;
+  return `<c:ser><c:idx val="${k}"/><c:order val="${k}"/><c:tx><c:strRef><c:f>Sheet1!$${L}$1</c:f><c:strCache><c:ptCount val="1"/><c:pt idx="0"><c:v>${esc(y.name)}</c:v></c:pt></c:strCache></c:strRef></c:tx><c:spPr><a:solidFill><a:srgbClr val="${hex(colors[k % colors.length])}"><a:alpha val="60000"/></a:srgbClr></a:solidFill><a:ln w="19050">${fill}</a:ln></c:spPr><c:invertIfNegative val="0"/>${dLbls(cfg, 'bubble')}<c:xVal>${nums(`Sheet1!$A$2:$A$${n + 1}`, xValues(cfg))}</c:xVal><c:yVal>${nums(`Sheet1!$${L}$2:$${L}$${n + 1}`, y.values.slice(0, n).map((v) => Number(v) || 0))}</c:yVal><c:bubbleSize>${size}</c:bubbleSize><c:bubble3D val="0"/></c:ser>`;
+}
+
 export function chartXml(cfg, colors) {
   const type = cfg.type;
   const series = cfg.series;
@@ -43,11 +52,16 @@ export function chartXml(cfg, colors) {
       : `<c:doughnutChart><c:varyColors val="1"/>${s.map((q, i) => ser(cfg, q, i, colors, 'pie')).join('')}<c:firstSliceAng val="0"/><c:holeSize val="55"/></c:doughnutChart>`;
   } else {
     const horiz = type === 'bar';
-    if (type === 'scatter') plot = `<c:scatterChart><c:scatterStyle val="lineMarker"/><c:varyColors val="0"/>${series.map((q, i) => ser(cfg, q, i, colors, 'scatter')).join('')}${ax}</c:scatterChart>`;
+    const sec = type === 'combo' && !!cfg.secondary && series.length > 1;
+    if (type === 'bubble') {
+      const pairs = [];
+      for (let k = 0; k < series.length; k += 2) pairs.push(bser(cfg, series[k], series[k + 1], k / 2, colors));
+      plot = `<c:bubbleChart><c:varyColors val="0"/>${pairs.join('')}<c:bubbleScale val="100"/><c:showNegBubbles val="0"/>${ax}</c:bubbleChart>`;
+    } else if (type === 'scatter') plot = `<c:scatterChart><c:scatterStyle val="lineMarker"/><c:varyColors val="0"/>${series.map((q, i) => ser(cfg, q, i, colors, 'scatter')).join('')}${ax}</c:scatterChart>`;
     else if (type === 'radar') plot = `<c:radarChart><c:radarStyle val="marker"/><c:varyColors val="0"/>${series.map((q, i) => ser(cfg, q, i, colors, 'radar')).join('')}${ax}</c:radarChart>`;
     else if (type === 'combo') {
       plot = `<c:barChart><c:barDir val="col"/><c:grouping val="clustered"/><c:varyColors val="0"/>${series.slice(0, 1).map((q, i) => ser(cfg, q, i, colors, 'bar')).join('')}<c:gapWidth val="80"/>${ax}</c:barChart>`;
-      if (series.length > 1) plot += `<c:lineChart><c:grouping val="standard"/><c:varyColors val="0"/>${series.slice(1).map((q, i) => ser(cfg, q, i + 1, colors, 'line')).join('')}<c:marker val="1"/>${ax}</c:lineChart>`;
+      if (series.length > 1) plot += `<c:lineChart><c:grouping val="standard"/><c:varyColors val="0"/>${series.slice(1).map((q, i) => ser(cfg, q, i + 1, colors, 'line')).join('')}<c:marker val="1"/>${sec ? '<c:axId val="333333"/><c:axId val="444444"/>' : ax}</c:lineChart>`;
     } else if (type === 'line') plot = `<c:lineChart><c:grouping val="standard"/><c:varyColors val="0"/>${series.map((q, i) => ser(cfg, q, i, colors, 'line')).join('')}<c:marker val="1"/>${ax}</c:lineChart>`;
     else if (type === 'area') plot = `<c:areaChart><c:grouping val="standard"/><c:varyColors val="0"/>${series.map((q, i) => ser(cfg, q, i, colors, 'area')).join('')}${ax}</c:areaChart>`;
     else {
@@ -55,11 +69,12 @@ export function chartXml(cfg, colors) {
       plot = `<c:barChart><c:barDir val="${horiz ? 'bar' : 'col'}"/><c:grouping val="${p100 ? 'percentStacked' : stacked ? 'stacked' : 'clustered'}"/><c:varyColors val="0"/>${series.map((q, i) => ser(cfg, q, i, colors, 'bar')).join('')}<c:gapWidth val="80"/>${stacked ? '<c:overlap val="100"/>' : ''}${ax}</c:barChart>`;
     }
     const line = '<c:spPr><a:ln w="9525"><a:solidFill><a:srgbClr val="BDBDBD"/></a:solidFill></a:ln></c:spPr>';
-    if (type === 'scatter') {
+    if (type === 'scatter' || type === 'bubble') {
       const vax = (id, cross, pos, grid) => `<c:valAx><c:axId val="${id}"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:delete val="0"/><c:axPos val="${pos}"/>${grid ? '<c:majorGridlines><c:spPr><a:ln w="9525"><a:solidFill><a:srgbClr val="E6E6E6"/></a:solidFill></a:ln></c:spPr></c:majorGridlines>' : ''}${axTitle(id === 111111 ? cfg.catTitle : cfg.valTitle, pos === 'l')}<c:numFmt formatCode="General" sourceLinked="0"/><c:majorTickMark val="none"/><c:minorTickMark val="none"/><c:tickLblPos val="nextTo"/>${line}${txPr()}<c:crossAx val="${cross}"/><c:crosses val="autoZero"/><c:crossBetween val="midCat"/></c:valAx>`;
       axes = vax(111111, 222222, 'b', false) + vax(222222, 111111, 'l', true);
     } else axes = `<c:catAx><c:axId val="111111"/><c:scaling><c:orientation val="${horiz ? 'maxMin' : 'minMax'}"/></c:scaling><c:delete val="0"/><c:axPos val="${horiz ? 'l' : 'b'}"/>${axTitle(cfg.catTitle, horiz)}<c:numFmt formatCode="General" sourceLinked="0"/><c:majorTickMark val="none"/><c:minorTickMark val="none"/><c:tickLblPos val="nextTo"/>${line}${txPr()}<c:crossAx val="222222"/><c:crosses val="autoZero"/><c:auto val="1"/><c:lblAlgn val="ctr"/><c:lblOffset val="100"/><c:noMultiLvlLbl val="0"/></c:catAx>`
       + `<c:valAx><c:axId val="222222"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:delete val="0"/><c:axPos val="${horiz ? 'b' : 'l'}"/><c:majorGridlines><c:spPr><a:ln w="9525"><a:solidFill><a:srgbClr val="E6E6E6"/></a:solidFill></a:ln></c:spPr></c:majorGridlines>${axTitle(cfg.valTitle, !horiz)}<c:numFmt formatCode="${type === 'stacked100' ? '0%' : 'General'}" sourceLinked="0"/><c:majorTickMark val="none"/><c:minorTickMark val="none"/><c:tickLblPos val="nextTo"/><c:spPr><a:ln><a:noFill/></a:ln></c:spPr>${txPr()}<c:crossAx val="111111"/><c:crosses val="${horiz ? 'max' : 'autoZero'}"/><c:crossBetween val="${type === 'area' ? 'midCat' : 'between'}"/></c:valAx>`;
+    if (sec) axes += `<c:catAx><c:axId val="333333"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:delete val="1"/><c:axPos val="b"/><c:majorTickMark val="none"/><c:minorTickMark val="none"/><c:tickLblPos val="nextTo"/><c:crossAx val="444444"/><c:crosses val="autoZero"/><c:auto val="1"/><c:lblAlgn val="ctr"/><c:lblOffset val="100"/><c:noMultiLvlLbl val="0"/></c:catAx><c:valAx><c:axId val="444444"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:delete val="0"/><c:axPos val="r"/>${axTitle(cfg.secTitle, true)}<c:numFmt formatCode="General" sourceLinked="0"/><c:majorTickMark val="none"/><c:minorTickMark val="none"/><c:tickLblPos val="nextTo"/><c:spPr><a:ln><a:noFill/></a:ln></c:spPr>${txPr()}<c:crossAx val="333333"/><c:crosses val="max"/><c:crossBetween val="between"/></c:valAx>`;
   }
   const title = (cfg.title || '').trim();
   const titleXml = title
@@ -71,7 +86,7 @@ export function chartXml(cfg, colors) {
 
 // A minimal workbook holding the chart's data: labels in column A, one series per column after it.
 export async function workbook(JSZip, cfg) {
-  const rows = [['', ...cfg.series.map((s) => s.name)], ...cfg.labels.map((l, i) => [cfg.type === 'scatter' ? xValues(cfg)[i] : l,...cfg.series.map((s) => Number(s.values[i]) || 0)])];
+  const rows = [['', ...cfg.series.map((s) => s.name)], ...cfg.labels.map((l, i) => [cfg.type === 'scatter' || cfg.type === 'bubble' ? xValues(cfg)[i] : l,...cfg.series.map((s) => Number(s.values[i]) || 0)])];
   const cell = (v, r, c) => {
     const ref = col(c) + (r + 1);
     return typeof v === 'number' ? `<c r="${ref}"><v>${v}</v></c>` : `<c r="${ref}" t="inlineStr"><is><t>${esc(v)}</t></is></c>`;
