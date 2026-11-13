@@ -60,7 +60,7 @@ function insertTextbox() {
 }
 
 // ---------- charts ----------
-export const TYPES = ['column', 'stacked', 'bar', 'line', 'area', 'combo', 'scatter', 'radar', 'pie', 'donut'];
+export const TYPES = ['column', 'stacked', 'stacked100', 'bar', 'line', 'area', 'combo', 'scatter', 'radar', 'pie', 'donut'];
 export const MAX_SERIES = 12;
 export const PALETTE = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#6250d6', '#e34948', '#17a2b8', '#8a5a2b', '#7a8b99', '#c2185b'];
 const OTHER = '#9a9a9a', INK = '#1f1f1f', INK2 = '#5f5f5f', GRID = '#e6e6e6', AXIS = '#bdbdbd';
@@ -71,6 +71,8 @@ const full = new Intl.NumberFormat('en', { maximumFractionDigits: 2 });
 const short = new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 });
 const cut = (s, n) => (s.length > n ? s.slice(0, Math.max(1, n - 1)) + '…' : s);
 const f1 = (n) => Number(n.toFixed(1));
+const lab = (v) => (Math.abs(v) >= 10000 ? short : full).format(v);
+const onCol = (hex) => { const n = parseInt(String(hex).slice(1), 16), f = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }; return 0.2126 * f(n >> 16) + 0.7152 * f((n >> 8) & 255) + 0.0722 * f(n & 255) > 0.35 ? INK : '#fff'; };
 
 export function parseData(text) {
   const rows = text.replace(/\r/g, '').split('\n').map((l) => l.trim()).filter(Boolean).map((l) => l.split(l.includes('\t') ? '\t' : ',').map((c) => c.trim()));
@@ -123,6 +125,13 @@ export function renderChart(cfg) {
   const title = (cfg.title || '').trim();
   let body = '';
   let top = 20;
+  const pct100 = type === 'stacked100', dl = !!cfg.dataLabels;
+  const catT = (cfg.catTitle || '').trim(), valT = (cfg.valTitle || '').trim();
+  const botT = type === 'bar' ? valT : catT, leftT = type === 'bar' ? catT : valT;
+  const pl = leftT ? 16 : 0, pb = botT ? 16 : 0;
+  const dtxt = (px, py, v, anchor = 'middle', fill = INK2, maxW = 1e9) => (!dl || lab(v).length * 5.6 > maxW ? '' : `<text x="${f1(px)}" y="${f1(py)}" font-size="10" fill="${fill}" text-anchor="${anchor}">${lab(v)}</text>`);
+  const axT = (L, R, T, B) => (botT && type !== 'radar' ? `<text x="${f1((L + R) / 2)}" y="${H - 8}" font-size="12" fill="${INK2}" text-anchor="middle">${x(cut(botT, 60))}</text>` : '')
+    + (leftT && type !== 'radar' ? `<text transform="rotate(-90)" x="${-f1((T + B) / 2)}" y="14" font-size="12" fill="${INK2}" text-anchor="middle">${x(cut(leftT, 50))}</text>` : '');
   if (title) { body += `<text x="24" y="32" font-size="16" font-weight="600" fill="${INK}">${x(cut(title, 70))}</text>`; top = 48; }
   const desc = `${title || 'Chart'}: ${type} chart of ${series.map((s) => s.name).join(', ')} by ${labels.length} categories`;
 
@@ -140,6 +149,7 @@ export function renderChart(cfg) {
       body += parts.length === 1
         ? `<circle cx="${cx}" cy="${f1(cy)}" r="${f1(R)}" fill="${col}">${tip}</circle>`
         : `<path d="M${cx},${f1(cy)}L${pt(a0)}A${f1(R)},${f1(R)} 0 ${a1 - a0 > Math.PI ? 1 : 0} 1 ${pt(a1)}Z" fill="${col}" stroke="#fff" stroke-width="2" stroke-linejoin="round">${tip}</path>`;
+      if (dl && a1 - a0 > 0.25 && parts.length > 1) { const am = (a0 + a1) / 2, rr = R * (type === 'donut' ? 0.78 : 0.65); body += `<text x="${f1(cx + rr * Math.cos(am))}" y="${f1(cy + rr * Math.sin(am) + 4)}" font-size="11" font-weight="600" fill="${onCol(col)}" text-anchor="middle">${f1((p.v / total) * 100)}%</text>`; }
       const ly = cy - (parts.length - 1) * 12 + i * 24;
       body += `<rect x="372" y="${f1(ly - 9)}" width="10" height="10" rx="2" fill="${col}"/><text x="388" y="${f1(ly)}" font-size="12" fill="${INK}">${x(cut(p.l, 22))}</text><text x="${W - 24}" y="${f1(ly)}" font-size="12" fill="${INK2}" text-anchor="end">${full.format(p.v)} · ${f1((p.v / total) * 100)}%</text>`;
       a0 = a1;
@@ -150,18 +160,19 @@ export function renderChart(cfg) {
     if (series.length > 1) { body += legend(series.map((s) => s.name), PALETTE, top + 8); top += 26; }
     const all = series.flatMap((s) => s.values);
     const stackTot = (i) => series.reduce((a, s) => a + Math.max(0, s.values[i] || 0), 0);
-    const hiV = type === 'stacked' ? Math.max(0, ...labels.map((_, i) => stackTot(i))) : Math.max(0, ...all);
+    const hiV = pct100 ? 100 : type === 'stacked' ? Math.max(0, ...labels.map((_, i) => stackTot(i))) : Math.max(0, ...all);
     const sc = scale(Math.min(0, ...all), hiV);
     const n = Math.max(1, labels.length), m = series.length || 1;
     if (type === 'scatter') {
       const xs = labels.map((l, i) => { const v = Number(String(l).replace(/[,\s%£$€]/g, '')); return String(l).trim() !== '' && isFinite(v) ? v : i + 1; });
       const sx = scale(Math.min(...xs, Infinity) === Infinity ? 0 : Math.min(...xs), Math.max(...xs, -Infinity) === -Infinity ? 1 : Math.max(...xs));
-      const L = 56, R = W - 24, T = top + 8, B = H - 40;
+      const L = 56 + pl, R = W - 24, T = top + 8, B = H - 40 - pb;
       const Y = (v) => B - ((v - sc.lo) / (sc.hi - sc.lo)) * (B - T), X = (v) => L + ((v - sx.lo) / (sx.hi - sx.lo)) * (R - L);
-      for (const t of sc.ticks) body += `<line x1="${L}" x2="${R}" y1="${f1(Y(t))}" y2="${f1(Y(t))}" stroke="${GRID}"/><text x="${L - 8}" y="${f1(Y(t) + 4)}" font-size="11" fill="${INK2}" text-anchor="end">${short.format(t)}</text>`;
+      for (const t of sc.ticks) body += `<line x1="${L}" x2="${R}" y1="${f1(Y(t))}" y2="${f1(Y(t))}" stroke="${GRID}"/><text x="${L - 8}" y="${f1(Y(t) + 4)}" font-size="11" fill="${INK2}" text-anchor="end">${pct100 ? t + '%' : short.format(t)}</text>`;
       for (const t of sx.ticks) body += `<line x1="${f1(X(t))}" x2="${f1(X(t))}" y1="${T}" y2="${B}" stroke="${GRID}"/><text x="${f1(X(t))}" y="${B + 18}" font-size="11" fill="${INK2}" text-anchor="middle">${short.format(t)}</text>`;
-      series.forEach((s, j) => xs.forEach((xv, i) => { body += `<circle cx="${f1(X(xv))}" cy="${f1(Y(s.values[i] || 0))}" r="5" fill="${PALETTE[j]}" fill-opacity="0.85" stroke="#fff" stroke-width="1.5"><title>${x(s.name)}: (${full.format(xv)}, ${full.format(s.values[i] || 0)})</title></circle>`; }));
+      series.forEach((s, j) => xs.forEach((xv, i) => { body += `<circle cx="${f1(X(xv))}" cy="${f1(Y(s.values[i] || 0))}" r="5" fill="${PALETTE[j]}" fill-opacity="0.85" stroke="#fff" stroke-width="1.5"><title>${x(s.name)}: (${full.format(xv)}, ${full.format(s.values[i] || 0)})</title></circle>${dtxt(X(xv), Y(s.values[i] || 0) - 9, s.values[i] || 0)}`; }));
       body += `<line x1="${L}" x2="${R}" y1="${B}" y2="${B}" stroke="${AXIS}"/><line x1="${L}" x2="${L}" y1="${T}" y2="${B}" stroke="${AXIS}"/>`;
+      body += axT(L, R, T, B);
     } else if (type === 'radar') {
       const rs = scale(0, Math.max(0, ...all)), cx = W / 2, cy = (top + H - 8) / 2 + 4, R0 = Math.min((H - top - 52) / 2, 140), k = Math.max(3, n);
       const ang = (i) => -Math.PI / 2 + (i / k) * Math.PI * 2, P = (i, r) => `${f1(cx + r * Math.cos(ang(i)))},${f1(cy + r * Math.sin(ang(i)))}`;
@@ -181,7 +192,7 @@ export function renderChart(cfg) {
       });
     } else if (type === 'bar') {
       const longest = Math.max(0, ...labels.map((l) => Math.min(l.length, 18)));
-      const L = 28 + longest * 6.2, R = W - 28, T = top + 6, B = H - 34;
+      const L = 28 + longest * 6.2 + pl, R = W - 28, T = top + 6, B = H - 34 - pb;
       const X = (v) => L + ((v - sc.lo) / (sc.hi - sc.lo)) * (R - L);
       for (const t of sc.ticks) body += `<line x1="${f1(X(t))}" x2="${f1(X(t))}" y1="${T}" y2="${B}" stroke="${GRID}"/><text x="${f1(X(t))}" y="${B + 16}" font-size="11" fill="${INK2}" text-anchor="middle">${short.format(t)}</text>`;
       const band = (B - T) / n, pad = Math.min(10, band * 0.18), bh = Math.max(2, (band - pad * 2 - (m - 1) * 2) / m);
@@ -190,45 +201,47 @@ export function renderChart(cfg) {
         series.forEach((s, j) => {
           const v = s.values[i] || 0;
           if (v) body += `<path d="${hbar(T + band * i + pad + j * (bh + 2), X(0), X(v), bh)}" fill="${PALETTE[j]}"><title>${x(l)} · ${x(s.name)}: ${full.format(v)}</title></path>`;
+          if (v) body += dtxt(X(v) + (v < 0 ? -4 : 4), T + band * i + pad + j * (bh + 2) + bh / 2 + 3.5, v, v < 0 ? 'end' : 'start');
         });
       });
       body += `<line x1="${f1(X(0))}" x2="${f1(X(0))}" y1="${T}" y2="${B}" stroke="${AXIS}"/>`;
+      body += axT(L, R, T, B);
     } else {
-      const L = 56, R = W - 24, T = top + 8, B = H - 40;
+      const L = 56 + pl, R = W - 24, T = top + 8, B = H - 40 - pb;
       const Y = (v) => B - ((v - sc.lo) / (sc.hi - sc.lo)) * (B - T);
-      for (const t of sc.ticks) body += `<line x1="${L}" x2="${R}" y1="${f1(Y(t))}" y2="${f1(Y(t))}" stroke="${GRID}"/><text x="${L - 8}" y="${f1(Y(t) + 4)}" font-size="11" fill="${INK2}" text-anchor="end">${short.format(t)}</text>`;
+      for (const t of sc.ticks) body += `<line x1="${L}" x2="${R}" y1="${f1(Y(t))}" y2="${f1(Y(t))}" stroke="${GRID}"/><text x="${L - 8}" y="${f1(Y(t) + 4)}" font-size="11" fill="${INK2}" text-anchor="end">${pct100 ? t + '%' : short.format(t)}</text>`;
       const band = (R - L) / n;
       const every = Math.ceil(n / Math.max(1, Math.floor((R - L) / 64)));
       const maxCh = Math.max(3, Math.floor((band * every) / 6.4));
       labels.forEach((l, i) => { if (i % every === 0) body += `<text x="${f1(L + band * i + band / 2)}" y="${B + 18}" font-size="11" fill="${INK2}" text-anchor="middle">${x(cut(l, maxCh))}</text>`; });
-      if (type === 'stacked') {
+      if (type === 'stacked' || pct100) {
         const pad = Math.min(14, band * 0.18), bw = Math.max(2, band - pad * 2);
         labels.forEach((l, i) => { let acc = 0; series.forEach((s, j) => {
-          const v = Math.max(0, s.values[i] || 0);
-          if (v) { const y0 = Y(acc), y1 = Y(acc + v); body += `<rect x="${f1(L + band * i + pad)}" y="${f1(y1)}" width="${f1(bw)}" height="${f1(Math.max(0.5, y0 - y1 - 1))}" fill="${PALETTE[j]}"><title>${x(l)} · ${x(s.name)}: ${full.format(v)}</title></rect>`; }
+          const raw = Math.max(0, s.values[i] || 0), v = pct100 ? (raw / (stackTot(i) || 1)) * 100 : raw;
+          if (v) { const y0 = Y(acc), y1 = Y(acc + v); body += `<rect x="${f1(L + band * i + pad)}" y="${f1(y1)}" width="${f1(bw)}" height="${f1(Math.max(0.5, y0 - y1 - 1))}" fill="${PALETTE[j]}"><title>${x(l)} · ${x(s.name)}: ${full.format(raw)}${pct100 ? ' (' + f1(v) + '%)' : ''}</title></rect>`; if (dl && y0 - y1 >= 13 && bw >= 22) body += `<text x="${f1(L + band * i + pad + bw / 2)}" y="${f1((y0 + y1) / 2 + 3.5)}" font-size="10" fill="${onCol(PALETTE[j])}" text-anchor="middle" pointer-events="none">${pct100 ? Math.round(v) + '%' : lab(raw)}</text>`; }
           acc += v;
         }); });
       } else if (type === 'column' || type === 'combo') {
         const mm = type === 'combo' ? 1 : m, pad = Math.min(14, band * 0.18), bw = Math.max(2, (band - pad * 2 - (mm - 1) * 2) / mm);
         labels.forEach((l, i) => series.slice(0, mm).forEach((s, j) => {
           const v = s.values[i] || 0;
-          if (v) body += `<path d="${vbar(L + band * i + pad + j * (bw + 2), Y(0), Y(v), bw)}" fill="${PALETTE[j]}"><title>${x(l)} · ${x(s.name)}: ${full.format(v)}</title></path>`;
+          if (v) body += `<path d="${vbar(L + band * i + pad + j * (bw + 2), Y(0), Y(v), bw)}" fill="${PALETTE[j]}"><title>${x(l)} · ${x(s.name)}: ${full.format(v)}</title></path>` + dtxt(L + band * i + pad + j * (bw + 2) + bw / 2, v < 0 ? Y(v) + 12 : Y(v) - 4, v, 'middle', INK2, bw + 6);
         }));
         if (type === 'combo') series.forEach((s, j) => {
           if (j === 0) return;
           const pts = labels.map((l, i) => [L + band * i + band / 2, Y(s.values[i] || 0)]);
           body += `<path d="M${pts.map((p) => `${f1(p[0])},${f1(p[1])}`).join('L')}" fill="none" stroke="${PALETTE[j]}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
-          if (n <= 24) pts.forEach((p, i) => { body += `<circle cx="${f1(p[0])}" cy="${f1(p[1])}" r="4" fill="${PALETTE[j]}" stroke="#fff" stroke-width="2"><title>${x(labels[i])} · ${x(s.name)}: ${full.format(s.values[i] || 0)}</title></circle>`; });
+          if (n <= 24) pts.forEach((p, i) => { body += `<circle cx="${f1(p[0])}" cy="${f1(p[1])}" r="4" fill="${PALETTE[j]}" stroke="#fff" stroke-width="2"><title>${x(labels[i])} · ${x(s.name)}: ${full.format(s.values[i] || 0)}</title></circle>${dtxt(p[0], p[1] - 9, s.values[i] || 0)}`; });
         });
       } else {
         series.forEach((s, j) => {
           const pts = labels.map((l, i) => [L + band * i + band / 2, Y(s.values[i] || 0)]);
           if (type === 'area') body += `<path d="M${f1(pts[0][0])},${f1(Y(0))}L${pts.map((p) => `${f1(p[0])},${f1(p[1])}`).join('L')}L${f1(pts[pts.length - 1][0])},${f1(Y(0))}Z" fill="${PALETTE[j]}" fill-opacity="0.3"/>`;
           body += `<path d="M${pts.map((p) => `${f1(p[0])},${f1(p[1])}`).join('L')}" fill="none" stroke="${PALETTE[j]}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
-          if (n <= 24) pts.forEach((p, i) => { body += `<circle cx="${f1(p[0])}" cy="${f1(p[1])}" r="4" fill="${PALETTE[j]}" stroke="#fff" stroke-width="2"><title>${x(labels[i])} · ${x(s.name)}: ${full.format(s.values[i] || 0)}</title></circle>`; });
+          if (n <= 24) pts.forEach((p, i) => { body += `<circle cx="${f1(p[0])}" cy="${f1(p[1])}" r="4" fill="${PALETTE[j]}" stroke="#fff" stroke-width="2"><title>${x(labels[i])} · ${x(s.name)}: ${full.format(s.values[i] || 0)}</title></circle>${dtxt(p[0], p[1] - 9, s.values[i] || 0)}`; });
         });
       }
-      body += `<line x1="${L}" x2="${R}" y1="${f1(Y(0))}" y2="${f1(Y(0))}" stroke="${AXIS}"/>`;
+      body += `<line x1="${L}" x2="${R}" y1="${f1(Y(0))}" y2="${f1(Y(0))}" stroke="${AXIS}"/>` + axT(L, R, T, B);
     }
   }
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="${x(desc)}" font-family="${FONT}">${body}</svg>`;
@@ -247,6 +260,9 @@ function openChart(target) {
   const cfg = chartTarget ? readCfg(chartTarget) : null;
   api.$('#ch-type').value = cfg ? cfg.type : 'column';
   api.$('#ch-title').value = cfg ? cfg.title || '' : '';
+  api.$('#ch-labels').checked = !!(cfg && cfg.dataLabels);
+  api.$('#ch-cat').value = cfg ? cfg.catTitle || '' : '';
+  api.$('#ch-val').value = cfg ? cfg.valTitle || '' : '';
   api.$('#ch-data').value = cfg ? toCsv(cfg) : DEMO;
   api.$('#ch-ok').textContent = chartTarget ? 'Update chart' : 'Insert chart';
   const dlg = api.$('#dlg-chart');
@@ -257,6 +273,9 @@ function applyChart() {
   const data = parseData(api.$('#ch-data').value);
   if (!data) { api.toast('The chart needs a label column and at least one column of numbers.'); return; }
   const cfg = { type: api.$('#ch-type').value, title: api.$('#ch-title').value.trim(), labels: data.labels, series: data.series };
+  if (api.$('#ch-labels').checked) cfg.dataLabels = true;
+  if (api.$('#ch-cat').value.trim()) cfg.catTitle = api.$('#ch-cat').value.trim();
+  if (api.$('#ch-val').value.trim()) cfg.valTitle = api.$('#ch-val').value.trim();
   if (data.dropped) api.toast('Charts show up to 12 series. The extra columns were left out.');
   if (chartTarget && chartTarget.isConnected) {
     api.commit();
