@@ -570,7 +570,17 @@ async function headerFooter(zip) {
     if (pg) { out.num = `${key === 'header' ? 'top' : 'bottom'}-${pg.align}`; out.numFormat = '1'; }
   }
   const titlePg = kids(sect, 'titlePg').length > 0;
-  if (titlePg) out.firstDiff = true;
+  if (titlePg) {
+    out.firstDiff = true;
+    for (const [tag, key] of [['headerReference', 'firstHeader'], ['footerReference', 'firstFooter']]) {
+      const ref = kids(sect, tag).find((r) => attr(r, 'type') === 'first');
+      const t = ref && target.get(ref.getAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships', 'id') || ref.getAttribute('r:id'));
+      const part = t && await read(zip, 'word/' + t.replace(/^\/?(word\/)?/, ''));
+      const s = part && slots(part);
+      const text = s && s.filter((x) => x.text).map((x) => x.text).join(' · ');
+      if (text) out[key] = text;
+    }
+  }
   return Object.keys(out).length ? out : null;
 }
 

@@ -1016,6 +1016,35 @@ const tests = [
     if (right && right.previousElementSibling && !/Host one/.test(right.previousElementSibling.textContent)) f.push('the floating box should follow Host one, ahead of its own (empty) anchor paragraph: ' + box.innerHTML.slice(0, 300));
     return { fail: f, info: tbs.length + ' boxes' };
   } },
+  { name: 'First-page header and footer text survive a Word round trip', async run() {
+    const { exportDocx, loadScript } = await import('../js/docx.js?t=' + Date.now());
+    const { prepare } = await import('../js/docximport.js?t=' + Date.now());
+    const JSZip = await loadScript('../vendor/jszip.min.js', 'JSZip');
+    const f = [], root = document.createElement('div');
+    root.innerHTML = '<p>Hello</p>';
+    const page = { w: 210, h: 297, m: { t: 25, r: 25, b: 25, l: 25 } };
+    const go = async (hf) => (await prepare(JSZip, await (await exportDocx(root, { title: 't', page, hf })).arrayBuffer())).extra.hf || {};
+    const a = await go({ header: 'Running', headerAlign: 'right', footer: '', num: 'none', numFormat: '1', firstDiff: true, firstHeader: 'Cover title', firstFooter: 'Confidential' });
+    if (a.firstHeader !== 'Cover title') f.push('first header came back as ' + JSON.stringify(a.firstHeader));
+    if (a.firstFooter !== 'Confidential') f.push('first footer came back as ' + JSON.stringify(a.firstFooter));
+    if (a.header !== 'Running') f.push('default header came back as ' + JSON.stringify(a.header));
+    if (!a.firstDiff) f.push('different-first-page setting lost');
+    const b = await go({ header: 'Running', headerAlign: 'left', footer: '', num: 'none', numFormat: '1', firstDiff: true });
+    if (!b.firstDiff || b.firstHeader || b.firstFooter) f.push('a blank first page gained text: ' + JSON.stringify(b));
+    // the page shows the first-page text on page 1 only
+    const dlg = D.querySelector('#dlg-hf');
+    await load('<p>x</p>');
+    D.querySelector('#hf-header').value = 'Running'; D.querySelector('#hf-first').checked = true;
+    D.querySelector('#hf-first-header').value = 'Cover title';
+    dlg.returnValue = 'ok'; dlg.dispatchEvent(new Event('close'));
+    await sleep(300);
+    const tops = [...D.querySelectorAll('.hf-layer .hf-header')].map((z) => z.textContent.trim());
+    if (tops[0] !== 'Cover title') f.push('page 1 header shows ' + JSON.stringify(tops[0]));
+    D.querySelector('#hf-first').checked = false; D.querySelector('#hf-header').value = ''; D.querySelector('#hf-first-header').value = '';
+    dlg.returnValue = 'ok'; dlg.dispatchEvent(new Event('close'));
+    await sleep(200);
+    return { fail: f, info: JSON.stringify(a) };
+  } },
   { name: 'A text box keeps its fill and outline through a Word round trip', async run() {
     const { exportDocx, loadScript } = await import('../js/docx.js?t=' + Date.now());
     const { prepare } = await import('../js/docximport.js?t=' + Date.now());

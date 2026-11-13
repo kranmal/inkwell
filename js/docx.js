@@ -591,7 +591,10 @@ export async function exportDocx(root, { title = 'Document', page, hf = null, st
     secDefs.push({ H: eff, m: pm ? { t: pm[0], r: pm[1], b: pm[2], l: pm[3] } : prev.m, landscape: d.landscape === undefined ? prev.landscape : !!d.landscape, restart: d.restart != null && d.restart !== '' ? Number(d.restart) : null });
   }
   for (const sd of secDefs) { sd.hx = zone('header', sd.H); sd.fx = zone('footer', sd.H); }
-  const anyHdr = secDefs.some((sd) => sd.hx), anyFtr = secDefs.some((sd) => sd.fx);
+  // A different first page: its own header and footer text (page numbers stay off it).
+  const FH = H.firstDiff ? { ...H, header: H.firstHeader || '', footer: H.firstFooter || '', num: 'none' } : null;
+  const firstHx = FH ? zone('header', FH) : '', firstFx = FH ? zone('footer', FH) : '';
+  const anyHdr = secDefs.some((sd) => sd.hx) || !!firstHx, anyFtr = secDefs.some((sd) => sd.fx) || !!firstFx;
   const parts = [];             // header/footer parts: { file, kind, xml }
   const partRel = (kind, xml) => {
     let p = parts.find((q) => q.kind === kind && q.xml === xml);
@@ -608,6 +611,10 @@ export async function exportDocx(root, { title = 'Document', page, hf = null, st
     let refs = '';
     if (anyHdr) refs += `<w:headerReference w:type="default" r:id="${partRel('header', sd.hx || emptyPart('hdr'))}"/>`;
     if (anyFtr) refs += `<w:footerReference w:type="default" r:id="${partRel('footer', sd.fx || emptyPart('ftr'))}"/>`;
+    if (first && H.firstDiff) {
+      if (anyHdr) refs += `<w:headerReference w:type="first" r:id="${partRel('header', firstHx || emptyPart('hdr'))}"/>`;
+      if (anyFtr) refs += `<w:footerReference w:type="first" r:id="${partRel('footer', firstFx || emptyPart('ftr'))}"/>`;
+    }
     const [pw, ph] = sd.landscape ? [longSide, shortSide] : [shortSide, longSide];
     const cols = page.cols || 1;
     return `<w:sectPr>${refs}<w:type w:val="nextPage"/><w:pgSz w:w="${tw(pw)}" w:h="${tw(ph)}"${sd.landscape ? ' w:orient="landscape"' : ''}/><w:pgMar w:top="${tw(sd.m.t)}" w:right="${tw(sd.m.r)}" w:bottom="${tw(sd.m.b)}" w:left="${tw(sd.m.l)}" w:header="708" w:footer="708" w:gutter="0"/>${sd.restart != null ? `<w:pgNumType w:start="${sd.restart}"/>` : ''}<w:cols w:num="${cols}" w:space="708"/>${first && H.firstDiff && refs ? '<w:titlePg/>' : ''}</w:sectPr>`;
