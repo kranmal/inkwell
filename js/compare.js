@@ -106,13 +106,14 @@ function mark(tag, time) {
 // ---------- inline formatting ----------
 // A word's look is the set of formatting that wraps it, between the word and its paragraph.
 const FTAG = { B: 'b', STRONG: 'b', I: 'i', EM: 'i', U: 'u', S: 's', STRIKE: 's', SUB: 'sub', SUP: 'sup', MARK: 'mark' };
-const FNAME = { b: 'Bold', i: 'Italic', u: 'Underline', s: 'Strikethrough', sub: 'Subscript', sup: 'Superscript', mark: 'Highlight', color: 'Font colour', bg: 'Highlight', font: 'Font', size: 'Font size' };
+const FNAME = { b: 'Bold', i: 'Italic', u: 'Underline', s: 'Strikethrough', sub: 'Subscript', sup: 'Superscript', mark: 'Highlight', color: 'Font colour', bg: 'Highlight', font: 'Font', size: 'Font size', link: 'Link' };
 const scratch = document.createElement('span');
 const css = (el, prop) => { const v = el.style && el.style.getPropertyValue(prop); if (!v) return ''; scratch.style.cssText = ''; scratch.style.setProperty(prop, v); return scratch.style.getPropertyValue(prop).toLowerCase(); };
 function looks(node, root) {
   const set = new Set();
   for (let e = node.parentElement; e && e !== root; e = e.parentElement) {
     if (FTAG[e.tagName]) set.add(FTAG[e.tagName]);
+    if (e.tagName === 'A' && e.hasAttribute('href')) set.add('link=' + e.getAttribute('href'));
     const w = css(e, 'font-weight'), fs = css(e, 'font-style'), td = css(e, 'text-decoration') + ' ' + css(e, 'text-decoration-line'), va = css(e, 'vertical-align');
     if (w === 'bold' || +w >= 600) set.add('b');
     if (fs === 'italic' || fs === 'oblique') set.add('i');
@@ -204,7 +205,7 @@ function markText(el, src, time) {
     if (x.fc) {
       if (x.e - x.s < at.length) at.splitText(x.e - x.s);
       let top = at;                                  // take in the formatting around the words when it holds nothing else
-      while (top.parentElement && top.parentElement !== el && (FTAG[top.parentElement.tagName] || top.parentElement.tagName === 'SPAN') && !top.parentElement.matches('.fc,.cm,.tc') && norm(top.parentElement.textContent) === norm(at.textContent)) top = top.parentElement;
+      while (top.parentElement && top.parentElement !== el && (FTAG[top.parentElement.tagName] || top.parentElement.tagName === 'SPAN' || top.parentElement.tagName === 'A') && !top.parentElement.matches('.fc,.cm,.tc') && norm(top.parentElement.textContent) === norm(at.textContent)) top = top.parentElement;
       const w = document.createElement('span');
       w.className = 'fc'; w.dataset.author = AUTHOR; w.dataset.time = String(time); w.dataset.label = x.label; w.dataset.was = wasHtml(src, x.run);
       top.replaceWith(w); w.append(top);
@@ -219,6 +220,44 @@ function markText(el, src, time) {
     else at.before(delEl(x.del));
   }
   return { text, fmt };
+}
+
+// ---------- charts, shapes and SmartArt ----------
+// Each is compared as a whole: same data and look means unchanged. A changed one is shown as the old object
+// struck out beside the new one marked as inserted; added and removed ones are marked where they are (or were).
+const OBJS = '.chart,.shape,.smartart';
+const kindOf = (el) => (el.classList.contains('chart') ? 'chart' : el.classList.contains('smartart') ? 'smartart' : 'shape');
+const objSig = (el) => { const k = kindOf(el); return k + hash(k === 'chart' ? (el.dataset.chart || '') + el.style.width : k === 'smartart' ? el.dataset.sa || '' : el.className + '|' + (el.getAttribute('style') || '') + '|' + norm(el.textContent)); };
+const objectsOf = (root) => [...root.querySelectorAll(OBJS)].filter((e) => !e.parentElement.closest(OBJS));
+function markObjects(A, B, time, st) {
+  const a = objectsOf(A), b = objectsOf(B), n = a.length, m = b.length;
+  if (!n && !m) return;
+  const sa = a.map(objSig), sb = b.map(objSig);
+  const L = Array.from({ length: n + 1 }, () => new Int32Array(m + 1));
+  for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) L[i][j] = sa[i] === sb[j] ? L[i + 1][j + 1] + 1 : Math.max(L[i + 1][j], L[i][j + 1]);
+  const gaps = [];
+  let i = 0, j = 0, gi = 0, gj = 0;
+  const close = (ei, ej) => { if (ei > gi || ej > gj) gaps.push({ o: a.slice(gi, ei), n: b.slice(gj, ej), anchor: b[ej] || null }); };
+  while (i < n && j < m) {
+    if (sa[i] === sb[j]) { close(i, j); i++; j++; gi = i; gj = j; } else if (L[i + 1][j] >= L[i][j + 1]) i++; else j++;
+  }
+  close(n, m);
+  const ghost = (src) => { const w = mark('del', time); w.append(src.cloneNode(true)); return w; };
+  const wrap = (el) => { const w = mark('ins', time); el.replaceWith(w); w.append(el); return w; };
+  for (const g of gaps) {
+    const free = [...g.o], gone = [];
+    for (const el of g.n) {
+      const at = free.findIndex((o) => kindOf(o) === kindOf(el));
+      const w = wrap(el);
+      if (at >= 0) { w.before(ghost(free.splice(at, 1)[0])); st.edited++; } else st.added++;
+    }
+    for (const o of free) gone.push(ghost(o));
+    for (const w of gone) {
+      if (g.anchor) g.anchor.before(w);
+      else if (m) { const last = b[m - 1]; (last.parentElement.matches('ins.tc') ? last.parentElement : last).after(w); } else { const notes = B.querySelector(':scope > ol.footnotes,:scope > ol.endnotes'); if (notes) notes.before(w); else B.append(w); }
+      st.removed++;
+    }
+  }
 }
 
 const topOf = (root, el) => { let t = el; while (t.parentElement && t.parentElement !== root) t = t.parentElement; return t; };
@@ -307,6 +346,7 @@ export function diffHtml(oldHtml, newHtml) {
       st.removed++;
     }
   });
+  markObjects(A, B, time, st);
   return { html: B.innerHTML, stats: st, changes: st.added + st.removed + st.edited + st.formatted };
 }
 
