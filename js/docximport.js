@@ -3,6 +3,7 @@
 // Strategy: rewrite word/document.xml so those things survive as private-use marker characters inside
 // ordinary text, let mammoth convert it, then turn the markers back into Inkwell's own elements.
 import { smartConfig } from './docxsmart.js';
+import { PALETTE } from './objects.js';
 const W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
 const O = '', M = '', C = '';          // open, middle, close markers
 const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -144,7 +145,21 @@ export function chartConfig(doc) {
       if (lab && lab.length > labels.length) labels = lab;
       const num = (a) => a.map((v) => { const n = parseFloat(v); return isFinite(n) ? n : 0; });
       const nm = (name && name[0]) || `Series ${series.length + 1}`;
-      series.push({ name: nm, values: num(vals) });
+      const entry = { name: nm, values: num(vals) };
+      const hexOf = (sp) => { const c = sp && sp.getElementsByTagNameNS('http://schemas.openxmlformats.org/drawingml/2006/main', 'srgbClr')[0]; const v = c && c.getAttribute('val'); return /^[0-9a-f]{6}$/i.test(v || '') ? '#' + v.toLowerCase() : null; };
+      const spOf = (el) => [...el.children].find((c) => c.localName === 'spPr');
+      if (type === 'pie' || type === 'donut') {
+        const pts = [...ser.children].filter((c) => c.localName === 'dPt');
+        const pc = [];
+        for (const d of pts) { const k = parseInt(cVal(cFirst(d, 'idx')), 10), col = hexOf(spOf(d)); if (k >= 0 && col) pc[k] = col; }
+        if (Array.from(pc).some((c, k) => c && c !== PALETTE[k])) entry.pointColors = Array.from(pc, (c) => c || null);
+      } else {
+        const sp = spOf(ser), A2 = 'http://schemas.openxmlformats.org/drawingml/2006/main';
+        const ln = sp && [...sp.children].find((c) => c.localName === 'ln');
+        const col = (['line', 'radar', 'scatter'].includes(type) || g.localName === 'lineChart') && ln && ![...ln.children].some((c) => c.localName === 'noFill') ? hexOf(ln) : hexOf(sp && { getElementsByTagNameNS: () => [...sp.children].filter((c) => c.localName === 'solidFill').flatMap((f) => [...f.getElementsByTagNameNS(A2, 'srgbClr')]) });
+        if (col && col !== PALETTE[type === 'bubble' ? series.length >> 1 : series.length]) entry.color = col;
+      }
+      series.push(entry);
       if (type === 'bubble') {   // a size series only when the sizes are real data (a literal is Inkwell's "equal bubbles")
         const bs = cFirst(ser, 'bubbleSize'), sz = bs && cFirst(bs, 'numRef') ? cache(cFirst(bs, 'numCache')) : null;
         if (sz) series.push({ name: `${nm} (size)`, values: num(sz) });
@@ -166,6 +181,13 @@ export function chartConfig(doc) {
     const ids = (g) => cKids(g, 'axId').map(cVal).join();
     const bar = groups.find((g) => g.localName.startsWith('bar')), line = groups.find((g) => g.localName === 'lineChart');
     if (bar && line && ids(bar) !== ids(line)) cfg.secondary = true;
+  }
+  const main = [...plot.children].find((c) => c.namespaceURI === CNS && c.localName === 'valAx' && !(xy && cVal(cFirst(c, 'axPos')) === 'b') && cVal(cFirst(c, 'crosses')) !== 'max');
+  if (main && type !== 'pie' && type !== 'donut') {
+    const sc = cFirst(main, 'scaling');
+    const mn = sc && cFirst(sc, 'min'), mx = sc && cFirst(sc, 'max');
+    if (mn && isFinite(parseFloat(cVal(mn)))) cfg.valMin = parseFloat(cVal(mn));
+    if (mx && isFinite(parseFloat(cVal(mx)))) cfg.valMax = parseFloat(cVal(mx));
   }
   for (const ax of [...plot.children].filter((c) => c.namespaceURI === CNS && /Ax$/.test(c.localName))) {
     const t = words([...ax.children].find((c) => c.localName === 'title'));

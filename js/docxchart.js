@@ -40,9 +40,17 @@ function bser(cfg, y, z, k, colors) {
   return `<c:ser><c:idx val="${k}"/><c:order val="${k}"/><c:tx><c:strRef><c:f>Sheet1!$${L}$1</c:f><c:strCache><c:ptCount val="1"/><c:pt idx="0"><c:v>${esc(y.name)}</c:v></c:pt></c:strCache></c:strRef></c:tx><c:spPr><a:solidFill><a:srgbClr val="${hex(colors[k % colors.length])}"><a:alpha val="60000"/></a:srgbClr></a:solidFill><a:ln w="19050">${fill}</a:ln></c:spPr><c:invertIfNegative val="0"/>${dLbls(cfg, 'bubble')}<c:xVal>${nums(`Sheet1!$A$2:$A$${n + 1}`, xValues(cfg))}</c:xVal><c:yVal>${nums(`Sheet1!$${L}$2:$${L}$${n + 1}`, y.values.slice(0, n).map((v) => Number(v) || 0))}</c:yVal><c:bubbleSize>${size}</c:bubbleSize><c:bubble3D val="0"/></c:ser>`;
 }
 
-export function chartXml(cfg, colors) {
+export function chartXml(cfg, baseColors) {
   const type = cfg.type;
   const series = cfg.series;
+  const own = (c) => (/^#?[0-9a-f]{6}$/i.test(c || '') ? c : null);   // series colours that came in from Word
+  let colors = baseColors.map((c, i) => own(series[type === 'bubble' ? 2 * i : i] && series[type === 'bubble' ? 2 * i : i].color) || c);
+  if (type === 'pie' || type === 'donut') {
+    const pc = (series[0] && series[0].pointColors) || [];
+    colors = baseColors.map((c, k) => own(pc[k]) || c);
+  }
+  const rng = (cfg.valMin != null || cfg.valMax != null)
+    ? `${cfg.valMax != null ? `<c:max val="${Number(cfg.valMax)}"/>` : ''}${cfg.valMin != null ? `<c:min val="${Number(cfg.valMin)}"/>` : ''}` : '';
   const ax = '<c:axId val="111111"/><c:axId val="222222"/>';
   let plot, axes = '';
   if (type === 'pie' || type === 'donut') {
@@ -73,7 +81,7 @@ export function chartXml(cfg, colors) {
       const vax = (id, cross, pos, grid) => `<c:valAx><c:axId val="${id}"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:delete val="0"/><c:axPos val="${pos}"/>${grid ? '<c:majorGridlines><c:spPr><a:ln w="9525"><a:solidFill><a:srgbClr val="E6E6E6"/></a:solidFill></a:ln></c:spPr></c:majorGridlines>' : ''}${axTitle(id === 111111 ? cfg.catTitle : cfg.valTitle, pos === 'l')}<c:numFmt formatCode="General" sourceLinked="0"/><c:majorTickMark val="none"/><c:minorTickMark val="none"/><c:tickLblPos val="nextTo"/>${line}${txPr()}<c:crossAx val="${cross}"/><c:crosses val="autoZero"/><c:crossBetween val="midCat"/></c:valAx>`;
       axes = vax(111111, 222222, 'b', false) + vax(222222, 111111, 'l', true);
     } else axes = `<c:catAx><c:axId val="111111"/><c:scaling><c:orientation val="${horiz ? 'maxMin' : 'minMax'}"/></c:scaling><c:delete val="0"/><c:axPos val="${horiz ? 'l' : 'b'}"/>${axTitle(cfg.catTitle, horiz)}<c:numFmt formatCode="General" sourceLinked="0"/><c:majorTickMark val="none"/><c:minorTickMark val="none"/><c:tickLblPos val="nextTo"/>${line}${txPr()}<c:crossAx val="222222"/><c:crosses val="autoZero"/><c:auto val="1"/><c:lblAlgn val="ctr"/><c:lblOffset val="100"/><c:noMultiLvlLbl val="0"/></c:catAx>`
-      + `<c:valAx><c:axId val="222222"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:delete val="0"/><c:axPos val="${horiz ? 'b' : 'l'}"/><c:majorGridlines><c:spPr><a:ln w="9525"><a:solidFill><a:srgbClr val="E6E6E6"/></a:solidFill></a:ln></c:spPr></c:majorGridlines>${axTitle(cfg.valTitle, !horiz)}<c:numFmt formatCode="${type === 'stacked100' ? '0%' : 'General'}" sourceLinked="0"/><c:majorTickMark val="none"/><c:minorTickMark val="none"/><c:tickLblPos val="nextTo"/><c:spPr><a:ln><a:noFill/></a:ln></c:spPr>${txPr()}<c:crossAx val="111111"/><c:crosses val="${horiz ? 'max' : 'autoZero'}"/><c:crossBetween val="${type === 'area' ? 'midCat' : 'between'}"/></c:valAx>`;
+      + `<c:valAx><c:axId val="222222"/><c:scaling><c:orientation val="minMax"/>${rng}</c:scaling><c:delete val="0"/><c:axPos val="${horiz ? 'b' : 'l'}"/><c:majorGridlines><c:spPr><a:ln w="9525"><a:solidFill><a:srgbClr val="E6E6E6"/></a:solidFill></a:ln></c:spPr></c:majorGridlines>${axTitle(cfg.valTitle, !horiz)}<c:numFmt formatCode="${type === 'stacked100' ? '0%' : 'General'}" sourceLinked="0"/><c:majorTickMark val="none"/><c:minorTickMark val="none"/><c:tickLblPos val="nextTo"/><c:spPr><a:ln><a:noFill/></a:ln></c:spPr>${txPr()}<c:crossAx val="111111"/><c:crosses val="${horiz ? 'max' : 'autoZero'}"/><c:crossBetween val="${type === 'area' ? 'midCat' : 'between'}"/></c:valAx>`;
     if (sec) axes += `<c:catAx><c:axId val="333333"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:delete val="1"/><c:axPos val="b"/><c:majorTickMark val="none"/><c:minorTickMark val="none"/><c:tickLblPos val="nextTo"/><c:crossAx val="444444"/><c:crosses val="autoZero"/><c:auto val="1"/><c:lblAlgn val="ctr"/><c:lblOffset val="100"/><c:noMultiLvlLbl val="0"/></c:catAx><c:valAx><c:axId val="444444"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:delete val="0"/><c:axPos val="r"/>${axTitle(cfg.secTitle, true)}<c:numFmt formatCode="General" sourceLinked="0"/><c:majorTickMark val="none"/><c:minorTickMark val="none"/><c:tickLblPos val="nextTo"/><c:spPr><a:ln><a:noFill/></a:ln></c:spPr>${txPr()}<c:crossAx val="333333"/><c:crosses val="max"/><c:crossBetween val="between"/></c:valAx>`;
   }
   const title = (cfg.title || '').trim();
