@@ -809,6 +809,28 @@ const tests = [
     if (!ed.querySelector('del.tc') || !ed.querySelector('ins.tc')) f.push('the document itself was changed');
     return { fail: f, info: JSON.stringify(Object.fromEntries(Object.entries(out).map(([k, v]) => [k, v.pdf]))) };
   } },
+  { name: 'The original print view gives back the old formatting and tables, and leaves the document as it was', async run() {
+    const { diffHtml } = await import('../js/compare.js?t=' + Date.now());
+    const oldH = '<p>Make <b>these words</b> bold and keep going on.</p><table><tbody><tr><td style="background-color:#ffff00">cell</td><td>two</td></tr></tbody></table>';
+    const newH = '<p>Make these words bold and keep going on.</p><table><tbody><tr><td>cell</td><td>two</td></tr></tbody></table>';
+    const r = diffHtml(oldH, newH), f = [];
+    await load(r.html, 1);
+    const rev = await W.eval(`import('${new URL('../js/review.js', location.href).href}')`);
+    const before = ed.innerHTML, seen = {};
+    await rev.withPrintView('original', async () => {
+      seen.bold = !!ed.querySelector('p b, p strong');
+      seen.shade = /ffff00|255, 255, 0/i.test(ed.querySelector('td').getAttribute('style') || '');
+      seen.marks = ed.querySelectorAll('span.fc').length;
+    });
+    if (!seen.bold) f.push('the removed bold did not come back in the original view');
+    if (!seen.shade) f.push('the removed cell shading did not come back in the original view');
+    if (seen.marks) f.push(seen.marks + ' format marks left in the original view');
+    if (ed.querySelector('p b, p strong')) f.push('the document kept the old bold after printing');
+    if (!ed.querySelector('span.fc')) f.push('the document lost its format marks after printing');
+    await rev.withPrintView('final', async () => { seen.finalBold = !!ed.querySelector('p b, p strong'); });
+    if (seen.finalBold) f.push('the final view shows bold');
+    return { fail: f, info: JSON.stringify(r.stats) };
+  } },
   { name: 'Back to 1 column removes every temporary wrapper', async run() {
     await load(longText(), 2); await setCols(1);
     const n = ed.querySelectorAll('.pgs-part').length;
