@@ -961,6 +961,26 @@ const tests = [
     }
     return { fail: f, info: tc.length + ' cell changes, ' + marks.length + ' marks' };
   } },
+  { name: 'Compare vertical merges write a tracked change on the continuation cell too', async run() {
+    const { diffHtml } = await import('../js/compare.js?t=' + Date.now());
+    const { exportDocx, loadScript } = await import('../js/docx.js?t=' + Date.now());
+    const oldH = '<table><tbody><tr><td>A</td><td>B</td></tr><tr><td>C</td><td>D</td></tr></tbody></table>';
+    const newH = '<table><tbody><tr><td rowspan="2">A</td><td>B</td></tr><tr><td>D</td></tr></tbody></table>';
+    const r = diffHtml(oldH, newH), f = [];
+    const root = document.createElement('div');
+    root.innerHTML = r.html;
+    const JSZip = await loadScript('../vendor/jszip.min.js', 'JSZip');
+    const zip = await JSZip.loadAsync(await (await exportDocx(root, { title: 't', page: { w: 210, h: 297, m: { t: 25, r: 25, b: 25, l: 25 } } })).arrayBuffer());
+    const xml = await zip.file('word/document.xml').async('string');
+    if (new DOMParser().parseFromString(xml, 'application/xml').querySelector('parsererror')) f.push('document.xml is not well-formed');
+    const pr = xml.match(/<w:tcPr>(?:(?!<\/w:tcPr><w:p)[\s\S])*?<\/w:tcPr>/g) || [];
+    const cont = pr.find((x) => /<w:vMerge\/>/.test(x.replace(/<w:tcPrChange[\s\S]*$/, '')));
+    if (!cont) f.push('no continuation cell was written');
+    else if (!/<w:tcPrChange/.test(cont)) f.push('the continuation cell has no tracked change: ' + cont);
+    const top = pr.find((x) => /vMerge w:val="restart"/.test(x.replace(/<w:tcPrChange[\s\S]*$/, '')));
+    if (!top || !/<w:tcPrChange/.test(top)) f.push('the top cell has no tracked change');
+    return { fail: f, info: pr.length + ' tcPr' };
+  } },
   { name: 'Untracked cell shading and borders in a Word file come back on the cells', async run() {
     const { prepare } = await import('../js/docximport.js?t=' + Date.now());
     const { exportDocx, loadScript } = await import('../js/docx.js?t=' + Date.now());
