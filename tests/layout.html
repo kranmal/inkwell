@@ -981,6 +981,25 @@ const tests = [
     if (!top || !/<w:tcPrChange/.test(top)) f.push('the top cell has no tracked change');
     return { fail: f, info: pr.length + ' tcPr' };
   } },
+  { name: 'Compare vertical splits write the old continuation on the freed cell below', async run() {
+    const { diffHtml } = await import('../js/compare.js?t=' + Date.now());
+    const { exportDocx, loadScript } = await import('../js/docx.js?t=' + Date.now());
+    const oldH = '<table><tbody><tr><td rowspan="3">A</td><td>B</td></tr><tr><td>C</td></tr><tr><td>D</td></tr></tbody></table>';
+    const newH = '<table><tbody><tr><td>A</td><td>B</td></tr><tr><td>X</td><td>C</td></tr><tr><td>Y</td><td>D</td></tr></tbody></table>';
+    const r = diffHtml(oldH, newH), f = [];
+    const root = document.createElement('div');
+    root.innerHTML = r.html;
+    const JSZip = await loadScript('../vendor/jszip.min.js', 'JSZip');
+    const zip = await JSZip.loadAsync(await (await exportDocx(root, { title: 't', page: { w: 210, h: 297, m: { t: 25, r: 25, b: 25, l: 25 } } })).arrayBuffer());
+    const xml = await zip.file('word/document.xml').async('string');
+    if (new DOMParser().parseFromString(xml, 'application/xml').querySelector('parsererror')) f.push('document.xml is not well-formed');
+    const ch = xml.match(/<w:tcPrChange [^>]*><w:tcPr>(?:(?!<\/w:tcPr>)[\s\S])*<\/w:tcPr><\/w:tcPrChange>/g) || [];
+    if (!ch.some((x) => /vMerge w:val="restart"/.test(x))) f.push('the top cell does not record its old merge: ' + ch.join(' || '));
+    if (ch.filter((x) => /<w:vMerge\/>/.test(x)).length < 2) f.push('the two freed cells below do not record the continuation: ' + ch.join(' || '));
+    const ids = [...xml.matchAll(/<w:tcPrChange w:id="(\d+)"/g)].map((m) => m[1]);
+    if (new Set(ids).size !== ids.length) f.push('tracked change ids repeat');
+    return { fail: f, info: ch.length + ' cell changes' };
+  } },
   { name: 'A tracked vertical split in a Word file restores the exact old row count', async run() {
     const { exportDocx, loadScript } = await import('../js/docx.js?t=' + Date.now());
     const { prepare } = await import('../js/docximport.js?t=' + Date.now());

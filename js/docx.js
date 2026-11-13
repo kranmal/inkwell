@@ -397,6 +397,18 @@ export async function exportDocx(root, { title = 'Document', page, hf = null, st
     let x = `<w:tbl><w:tblPr><w:tblW w:w="5000" w:type="pct"/><w:tblBorders>${sides.map((k) => (show.includes(k) ? on(k) : off(k))).join('')}</w:tblBorders><w:tblLayout w:type="fixed"/><w:tblCellMar><w:top w:w="60" w:type="dxa"/><w:left w:w="100" w:type="dxa"/><w:bottom w:w="60" w:type="dxa"/><w:right w:w="100" w:type="dxa"/></w:tblCellMar></w:tblPr><w:tblGrid>${cw.map((w) => `<w:gridCol w:w="${w}"/>`).join('')}</w:tblGrid>`;
     const repHead = cl.contains('rep-head');
     let lead = true;
+    // A split: the cells under a cell whose old merge was taller than it is now were continuations of it, so each records that as its old state.
+    const freed = new Map();
+    for (const cell of new Set(g.grid.flat())) {
+      if (!cell) continue;
+      const p0 = g.pos.get(cell), m0 = [...cell.children].find((e) => e.matches('span.fc') && 'cellSpan' in e.dataset);
+      if (!m0) continue;
+      const wrs = Number(m0.dataset.cellSpan.split(',')[1]) || 1;
+      for (let k = p0.rs; k < wrs; k++) {
+        const t = g.grid[p0.r + k] && g.grid[p0.r + k][p0.c];
+        if (t && g.pos.get(t).r === p0.r + k && g.pos.get(t).c === p0.c) freed.set(t, { mark: m0, wrs, k });
+      }
+    }
     for (let r = 0; r < g.nRows; r++) {
       const tr = g.rows[r];
       const headRow = tr.cells.length && [...tr.cells].every((c) => c.tagName === 'TH');
@@ -433,6 +445,11 @@ export async function exportDocx(root, { title = 'Document', page, hf = null, st
           const below = r - p.r;
           const old = below ? (wrs > below ? props(wcs, wrs, cell.style, fill, true) : props(wcs, 1, cell.style, fill, false)) : props(wcs, wrs, tmp.style, was);
           if (old !== pr) pr += `<w:tcPrChange w:id="${++annId}" w:author="${who(look)}" w:date="${iso(look.dataset.time)}"><w:tcPr>${old}</w:tcPr></w:tcPrChange>`;
+        }
+        const fr = freed.get(cell);
+        if (fr && !look) {
+          const old = props(p.cs, fr.wrs, cell.style, fill, true);
+          if (old !== pr) pr += `<w:tcPrChange w:id="${++annId}" w:author="${who(fr.mark)}" w:date="${iso(fr.mark.dataset.time)}"><w:tcPr>${old}</w:tcPr></w:tcPrChange>`;
         }
         let inner = '<w:p/>';
         if (p.r === r) {
