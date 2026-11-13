@@ -2,6 +2,7 @@
 // footnotes and endnotes, comments, tracked changes, and the default header and footer.
 // Strategy: rewrite word/document.xml so those things survive as private-use marker characters inside
 // ordinary text, let mammoth convert it, then turn the markers back into Inkwell's own elements.
+import { smartConfig } from './docxsmart.js';
 const W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
 const O = '', M = '', C = '';          // open, middle, close markers
 const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -101,6 +102,7 @@ function sectData(prev, next) {
 
 // ----- native Word charts -> Inkwell chart configs -----
 const CNS = 'http://schemas.openxmlformats.org/drawingml/2006/chart';
+const DGMNS = 'http://schemas.openxmlformats.org/drawingml/2006/diagram';
 const RNS = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
 const cKids = (el, n) => [...el.getElementsByTagNameNS(CNS, n)];
 const cFirst = (el, n) => el.getElementsByTagNameNS(CNS, n)[0] || null;
@@ -188,8 +190,22 @@ async function readCharts(zip) {
   return out;
 }
 
+// r:dm of each SmartArt in word/document.xml -> {kind, items}.
+async function readSmart(zip) {
+  const out = new Map();
+  const rels = await read(zip, 'word/_rels/document.xml.rels');
+  if (!rels) return out;
+  for (const r of rels.getElementsByTagName('Relationship')) {
+    if (!/\/diagramData$/.test(r.getAttribute('Type') || '')) continue;
+    const part = await read(zip, 'word/' + r.getAttribute('Target').replace(/^\/?(word\/)?/, '')).catch(() => null);
+    const cfg = part && smartConfig(part);
+    if (cfg) out.set(r.getAttribute('Id'), cfg);
+  }
+  return out;
+}
+
 // Rewrites the document XML in place and returns what the later steps need.
-function mark(doc, comments, notes, sects, charts) {
+function mark(doc, comments, notes, sects, charts, smart) {
   const refs = [];                       // note references in document order
   const active = new Set();
   const after = (host, text) => {        // a paragraph holding only a marker, placed right after `host`
@@ -217,6 +233,21 @@ function mark(doc, comments, notes, sects, charts) {
       }
       if (!cfg || !host || !top) continue;
       after(host, `H|${enc(JSON.stringify(cfg))}`);
+      top.remove();
+    }
+  }
+  // SmartArt: the same, from the diagram's data model.
+  if (smart && smart.size) {
+    for (const ch of [...doc.getElementsByTagName('*')].filter((e) => e.localName === 'relIds' && e.namespaceURI === DGMNS)) {
+      const cfg = smart.get(ch.getAttributeNS(RNS, 'dm') || ch.getAttribute('r:dm'));
+      let host = null, top = null;
+      for (let n = ch.parentNode; n && n !== doc; n = n.parentNode) {
+        if (n.namespaceURI === W && n.localName === 'p' && !host) host = n;
+        if (n.localName === 'drawing' && !top) top = n;
+        if (n.localName === 'AlternateContent') top = n;
+      }
+      if (!cfg || !host || !top) continue;
+      after(host, `G|${enc(JSON.stringify(cfg))}`);
       top.remove();
     }
   }
@@ -325,6 +356,7 @@ function unmark(html, comments, notes) {
       if (f[0] === 'S') return `<div class="page-break sect-break" contenteditable="false" data-sect="${esc(dec(f[1]))}"></div>`;
       if (f[0] === 'X') return `<div class="textbox"${Number(f[1]) > 40 ? ` style="width:${Math.min(Number(f[1]), 720)}px"` : ''}>${dec(f[2])}</div>`;
       if (f[0] === 'H') return `<figure class="chart" data-chart="${esc(dec(f[1]))}" contenteditable="false"></figure>`;
+      if (f[0] === 'G') return `<figure class="smartart" data-sa="${esc(dec(f[1]))}" contenteditable="false"></figure>`;
       if (f[0] === 'N') {
         const kind = f[1], id = dec(f[2]);
         return `<sup class="${kind === 'f' ? 'fn' : 'en'}-ref" data-fn="${kind}${esc(id)}" contenteditable="false">1</sup>`;
@@ -395,7 +427,8 @@ export async function prepare(JSZip, arrayBuffer) {
     const comments = await readComments(zip);
     const sects = await sectInfo(zip, docXml).catch(() => []);
     const charts = await readCharts(zip).catch(() => new Map());
-    const refs = mark(docXml, comments, notes, sects, charts);
+    const smart = await readSmart(zip).catch(() => new Map());
+    const refs = mark(docXml, comments, notes, sects, charts, smart);
     zip.file('word/document.xml', new XMLSerializer().serializeToString(docXml));
     const buffer = await zip.generateAsync({ type: 'arraybuffer' });
     const extra = {};

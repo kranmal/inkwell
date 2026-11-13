@@ -235,6 +235,36 @@ const tests = [
     cfgs.forEach((c, i) => { if (JSON.stringify(c) !== JSON.stringify(got[i])) f.push(`${c.type} changed: ${JSON.stringify(got[i])}`); });
     return { fail: f, info: got.length + ' charts' };
   } },
+  { name: 'SmartArt is exported as native Word diagram parts and re-imports as editable SmartArt', async run() {
+    const { exportDocx, loadScript } = await import('../js/docx.js?t=' + Date.now());
+    const { prepare } = await import('../js/docximport.js?t=' + Date.now());
+    const cfgs = [{ kind: 'process', items: ['Plan', 'Build & test', 'Launch'] }, { kind: 'cycle', items: ['Plan', 'Do', 'Check', 'Act'] }, { kind: 'hierarchy', items: ['Director', 'Design', 'Engineering', 'Sales'] }, { kind: 'list', items: ['Goals', 'Milestones'] }, { kind: 'pyramid', items: ['Vision', 'Strategy', 'Tactics', 'Daily work'] }];
+    const root = document.createElement('div');
+    root.innerHTML = '<p>Hello</p>' + cfgs.map((c) => `<figure class="smartart" data-sa='${JSON.stringify(c).replace(/'/g, '&#39;')}'></figure>`).join('') + '<p>End</p>';
+    const JSZip = await loadScript('../vendor/jszip.min.js', 'JSZip'), mammoth = await loadScript('../vendor/mammoth.browser.min.js', 'mammoth');
+    const blob = await exportDocx(root, { title: 't', page: { w: 210, h: 297, m: { t: 25, r: 25, b: 25, l: 25 } } });
+    const buf = await blob.arrayBuffer(), zip = await JSZip.loadAsync(buf), f = [];
+    const names = Object.keys(zip.files);
+    for (let i = 1; i <= cfgs.length; i++) for (const n of ['data', 'layout', 'quickStyle', 'colors', 'drawing']) {
+      const file = `word/diagrams/${n}${i}.xml`;
+      if (!names.includes(file)) { f.push('missing ' + file); continue; }
+      const d = new DOMParser().parseFromString(await zip.file(file).async('string'), 'application/xml');
+      if (d.getElementsByTagName('parsererror').length) f.push(file + ' is not well-formed');
+    }
+    const ct = await zip.file('[Content_Types].xml').async('string'), rels = await zip.file('word/_rels/document.xml.rels').async('string'), doc = await zip.file('word/document.xml').async('string');
+    for (const t of ['diagramData+xml', 'diagramLayout+xml', 'diagramStyle+xml', 'diagramColors+xml', 'diagramDrawing+xml']) if (!ct.includes(t)) f.push('no content type ' + t);
+    for (const t of ['/diagramData"', '/diagramLayout"', '/diagramQuickStyle"', '/diagramColors"', '/diagramDrawing"']) if (!rels.includes(t)) f.push('no relationship ' + t);
+    if ((doc.match(/<dgm:relIds/g) || []).length !== cfgs.length) f.push('expected ' + cfgs.length + ' diagrams in the document');
+    if (/word\/media\//.test(names.join())) f.push('SmartArt is still written as a picture');
+    const data1 = await zip.file('word/diagrams/data1.xml').async('string'), m = data1.match(/relId="(rId\d+)"/);
+    if (!m || !rels.includes(`Id="${m[1]}"`) || !new RegExp(`Id="${m[1]}"[^>]*diagramDrawing|diagramDrawing"[^>]*Id="${m[1]}"|Id="${m[1]}" Type="[^"]*diagramDrawing`).test(rels)) f.push('data model does not point at its drawing part');
+    const rich = await prepare(JSZip, buf), box = document.createElement('div');
+    box.innerHTML = rich.finish((await mammoth.convertToHtml({ arrayBuffer: rich.buffer })).value);
+    const got = [...box.querySelectorAll('figure.smartart')].map((x) => JSON.parse(x.dataset.sa));
+    if (got.length !== cfgs.length) f.push(`expected ${cfgs.length} diagrams, got ${got.length}`);
+    cfgs.forEach((c, i) => { if (JSON.stringify(c) !== JSON.stringify(got[i])) f.push(`${c.kind} changed: ${JSON.stringify(got[i])}`); });
+    return { fail: f, info: got.length + ' diagrams' };
+  } },
   { name: 'Compare marks removed table rows and cells, and added, removed and replaced pictures', async run() {
     const { diffHtml } = await import('../js/compare.js?t=' + Date.now());
     const I = (c) => `<img src="data:image/png;base64,${c}" alt="">`, A = I('AAAA'), B = I('BBBB'), C = I('CCCC');
