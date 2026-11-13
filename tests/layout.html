@@ -981,6 +981,34 @@ const tests = [
     if (!top || !/<w:tcPrChange/.test(top)) f.push('the top cell has no tracked change');
     return { fail: f, info: pr.length + ' tcPr' };
   } },
+  { name: 'A tracked vertical split in a Word file restores the exact old row count', async run() {
+    const { exportDocx, loadScript } = await import('../js/docx.js?t=' + Date.now());
+    const { prepare } = await import('../js/docximport.js?t=' + Date.now());
+    const JSZip = await loadScript('../vendor/jszip.min.js', 'JSZip');
+    const mammoth = await loadScript('../vendor/mammoth.browser.min.js', 'mammoth');
+    const root = document.createElement('div');
+    root.innerHTML = '<table><tbody>' + 'ABCD'.split('').map((x) => `<tr><td>${x}1</td><td>${x}2</td></tr>`).join('') + '</tbody></table>';
+    const zip = await JSZip.loadAsync(await (await exportDocx(root, { title: 't', page: { w: 210, h: 297, m: { t: 25, r: 25, b: 25, l: 25 } } })).arrayBuffer());
+    let xml = await zip.file('word/document.xml').async('string');
+    const f = [];
+    // Row 1 was the top of a three-row merge; rows 2 and 3 were its continuations; row 4 was never part of it.
+    let i = -1;
+    xml = xml.replace(/<w:tr>[\s\S]*?<\/w:tr>/g, (tr) => {
+      i++;
+      if (i > 2) return tr;
+      const old = i === 0 ? '<w:vMerge w:val="restart"/>' : '<w:vMerge/>';
+      return tr.replace(/<w:tcPr>([\s\S]*?)<\/w:tcPr>/, (m, inner) => `<w:tcPr>${inner}<w:tcPrChange w:id="${900 + i}" w:author="Ann" w:date="2026-01-01T00:00:00Z"><w:tcPr><w:tcW w:w="1000" w:type="dxa"/>${old}</w:tcPr></w:tcPrChange></w:tcPr>`);
+    });
+    zip.file('word/document.xml', xml);
+    const buf = await zip.generateAsync({ type: 'arraybuffer' });
+    const rich = await prepare(JSZip, buf);
+    const box = document.createElement('div');
+    box.innerHTML = rich.finish((await mammoth.convertToHtml({ arrayBuffer: rich.buffer })).value);
+    const m = box.querySelector('span.fc[data-cell-span]');
+    if (!m) f.push('no merge mark: ' + box.innerHTML.slice(0, 400));
+    else if (m.dataset.cellSpan !== '1,3') f.push('old span should be 1,3 but is ' + m.dataset.cellSpan);
+    return { fail: f, info: m ? m.dataset.cellSpan : 'none' };
+  } },
   { name: 'Untracked cell shading and borders in a Word file come back on the cells', async run() {
     const { prepare } = await import('../js/docximport.js?t=' + Date.now());
     const { exportDocx, loadScript } = await import('../js/docx.js?t=' + Date.now());

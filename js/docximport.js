@@ -323,7 +323,21 @@ function mark(doc, comments, notes, sects, charts, smart) {
     const was = fillOf(old), now = fillOf(pr), wasB = bordersOf(old), nowB = bordersOf(pr);
     const spanOf = (q) => { const g = q && [...q.children].find((c) => c.localName === 'gridSpan'); return Math.max(1, parseInt(g && attr(g, 'val'), 10) || 1); };
     const vOf = (q) => (q && [...q.children].some((c) => c.localName === 'vMerge') ? 1 : 0);
-    const wasCs = spanOf(old), wasV = vOf(old);
+    // A cell that was the top of a vertical merge: its old height is itself plus the rows below whose cell in the same column was a continuation (in the old state).
+    const colOf = (c) => { let n = 0; for (let q = c.previousElementSibling; q; q = q.previousElementSibling) if (q.localName === 'tc') n += spanOf([...q.children].find((e) => e.localName === 'tcPr')); return n; };
+    const oldOf = (c) => { const q = [...c.children].find((e) => e.localName === 'tcPr'), g = q && [...q.children].find((e) => e.localName === 'tcPrChange'); return g ? [...g.children].find((e) => e.localName === 'tcPr') : q; };
+    const rowsOld = () => {
+      let n = 1;
+      const col = colOf(tc);
+      for (let row = tc.parentNode.nextElementSibling; row && row.localName === 'tr'; row = row.nextElementSibling) {
+        const below = [...row.children].filter((e) => e.localName === 'tc').find((e) => colOf(e) === col);
+        const q = below && oldOf(below), v = q && [...q.children].find((e) => e.localName === 'vMerge');
+        if (!v || attr(v, 'val') === 'restart') break;
+        n++;
+      }
+      return n;
+    };
+    const wasCs = spanOf(old), wasV = vOf(old) ? rowsOld() : 0;
     if (was === now && wasB === nowB && wasCs === spanOf(pr) && wasV === vOf(pr)) continue;
     const t = firstText(tc);
     if (!t) continue;
@@ -538,17 +552,17 @@ export async function prepare(JSZip, arrayBuffer) {
         tpl.innerHTML = html;
         for (const sp of tpl.content.querySelectorAll('span[data-new-bg]')) {
           const cell = sp.closest('td,th'), bg = sp.getAttribute('data-new-bg'), bd = sp.getAttribute('data-new-border');
-          const oldCs = parseInt(sp.getAttribute('data-old-cs'), 10) || 1, oldV = sp.getAttribute('data-old-v') === '1';
+          const oldCs = parseInt(sp.getAttribute('data-old-cs'), 10) || 1, oldV = parseInt(sp.getAttribute('data-old-v'), 10) || 0;
           for (const k of ['new-bg', 'new-border', 'old-cs', 'old-v']) sp.removeAttribute('data-' + k);
           if (cell && bg) cell.style.backgroundColor = '#' + bg;
           if (cell && bd) for (const part of bd.split(';')) { const [prop, ...v] = part.split(':'); if (v.length) cell.style.setProperty(prop.trim(), v.join(':').trim()); }
-          // Old merge: the width is exact; a cell that was merged downwards is taken to have spanned the rows below it that are now its own, or two.
+          // Old merge: the width is exact; a cell that was merged downwards spanned itself plus the rows below it whose cell was a continuation (if none is recorded, the rows now its own, or two).
           if (sp.hasAttribute('data-look')) {      // untracked: nothing to undo, so drop the wrapper
             if (sp.hasAttribute('data-pad')) sp.remove(); else sp.replaceWith(...sp.childNodes);
             continue;
           }
           if (cell) {
-            const rs = oldV ? Math.max(cell.rowSpan, 2) : 1;
+            const rs = oldV > 1 ? oldV : oldV === 1 ? Math.max(cell.rowSpan, 2) : 1;
             if (oldCs !== cell.colSpan || rs !== cell.rowSpan) sp.setAttribute('data-cell-span', oldCs + ',' + rs);
           }
         }
