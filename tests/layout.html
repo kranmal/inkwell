@@ -265,6 +265,26 @@ const tests = [
     if (diffHtml(cur, cur).changes) f.push('identical document reported changes');
     return { fail: f, info: JSON.stringify(r.stats) };
   } },
+  { name: 'Compare marks formatting-only changes and reject restores the old look', async run() {
+    const { diffHtml } = await import('../js/compare.js?t=' + Date.now());
+    const old = '<p>Make this word bold and keep the rest.</p><p>A <i>slanted</i> word plus <span style="color: rgb(255, 0, 0)">red text</span> here.</p><p>Same words same look.</p>';
+    const cur = '<p>Make this <b>word</b> bold and keep the rest.</p><p>A slanted word plus <span style="color: rgb(0, 0, 255)">red text</span> here.</p><p>Same words same look.</p>';
+    const r = diffHtml(old, cur), f = [];
+    const box = document.createElement('div'); box.innerHTML = r.html;
+    const fcs = [...box.querySelectorAll('span.fc')];
+    if (fcs.length !== 3) f.push('expected 3 formatting marks, got ' + fcs.length + ': ' + r.html);
+    if (!fcs.some((e) => /Bold/.test(e.dataset.label) && e.textContent === 'word')) f.push('bold change not marked');
+    if (!fcs.some((e) => /Italic/.test(e.dataset.label) && /slanted/.test(e.textContent))) f.push('lost italic not marked');
+    if (!fcs.some((e) => /Font colour/.test(e.dataset.label))) f.push('colour change not marked');
+    if (r.stats.formatted !== 2 || r.stats.edited || r.stats.unmarked) f.push('stats ' + JSON.stringify(r.stats));
+    if (box.querySelectorAll('ins.tc,del.tc').length) f.push('format-only change produced text marks');
+    const rej = box.cloneNode(true);
+    rej.querySelectorAll('span.fc').forEach((e) => { const t = document.createElement('template'); t.innerHTML = e.dataset.was; e.replaceWith(t.content); });
+    if (rej.querySelectorAll('b').length) f.push('rejecting left bold in place: ' + rej.innerHTML);
+    if (!rej.querySelector('i') || !/255, 0, 0/.test(rej.innerHTML)) f.push('rejecting did not restore italic and red: ' + rej.innerHTML);
+    if (diffHtml(cur, cur).changes) f.push('identical document reported changes');
+    return { fail: f, info: JSON.stringify(r.stats) };
+  } },
   { name: 'PDF export has one page per layout page, real text, links and bookmarks', async run() {
     await load(`<h1>Heading one</h1><p>Visit <a href="https://example.com/x">our site</a> and <b>read</b> this.</p><p>${lorem(1200)}</p><h2>Second</h2><p>${lorem(300)}</p>`, 1);
     const pdf = await W.eval(`import('${new URL('../js/pdf.js', location.href).href}')`), pages = (await W.eval(`import('${new URL('../js/pages.js', location.href).href}')`)).count();
