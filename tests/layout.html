@@ -25,7 +25,8 @@
 <p><button id="run">Run again</button></p>
 <p id="sum">Running…</p>
 <table id="out"></table>
-<iframe id="app" src="../index.html?test" title="Inkwell under test"></iframe>
+<iframe id="app" title="Inkwell under test"></iframe>
+<script>document.getElementById("app").src = "../index.html?test&_=" + Date.now();</script>
 <script>
 const frame = document.getElementById('app');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -979,6 +980,22 @@ const tests = [
     if (st(cells[2])) f.push('a plain cell gained a style: ' + st(cells[2]));
     if (cells[1].textContent !== '') f.push('the empty cell gained text: ' + JSON.stringify(cells[1].textContent));
     return { fail: f, info: cells[0].outerHTML };
+  } },
+  { name: 'Cell borders draw, toggle and clear one side of the selected cell', async run() {
+    await load('<table><tbody><tr><td>A</td><td>B</td></tr></tbody></table>', 1);
+    const f = [], td = ed.querySelector('td'), win = ed.ownerDocument.defaultView;
+    const pick = async (v) => { win.getSelection().collapse(td.firstChild, 0); D.querySelector(`[data-cmd="cellBorder"][data-val="${v}"]`).click(); await sleep(150); };
+    const side = (d) => td.style.getPropertyValue('border-' + d + '-style');
+    await pick('top');
+    if (side('top') !== 'solid' || side('bottom')) f.push('top should be drawn alone: ' + td.outerHTML);
+    await pick('top');
+    if (side('top')) f.push('a second click should remove the top border: ' + td.outerHTML);
+    await pick('all');
+    if (!['top', 'right', 'bottom', 'left'].every((d) => side(d) === 'solid')) f.push('all sides not drawn: ' + td.outerHTML);
+    await pick('clear');
+    if (td.hasAttribute('style')) f.push('clear left a style: ' + td.outerHTML);
+    if (ed.querySelectorAll('td')[1].hasAttribute('style')) f.push('the neighbour cell changed');
+    return { fail: f, info: '' };
   } },
   { name: 'Back to 1 column removes every temporary wrapper', async run() {
     await load(longText(), 2); await setCols(1);
