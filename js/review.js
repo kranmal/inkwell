@@ -1,4 +1,5 @@
 // Comments and track changes, with a review pane listing both.
+import { resetHf } from './pages.js';
 let api;
 let pending = null;      // range waiting for a new comment
 let editing = null;      // comment id being edited
@@ -286,8 +287,35 @@ function resolveLook(el, accept) {
   }
   if (el.dataset.pad) el.remove(); else unwrap(el);
 }
+// A header, footer or page-number change from Compare: Accept keeps the new setting, Reject puts the old one back.
+// The line goes either way, and the note around the lines goes with the last one.
+function resolveHf(el, accept) {
+  if (!accept) {
+    let old = null;
+    try { old = JSON.parse(el.dataset.hfWas); } catch { /* none */ }
+    const key = el.dataset.hfKey, m = /^sect:(\d+):(\w+)$/.exec(key);
+    if (m) {
+      const b = api.editor.querySelectorAll('.sect-break')[Number(m[1])];
+      if (b) {
+        let o = {};
+        try { o = JSON.parse(b.dataset.sect || '{}') || {}; } catch { /* keep empty */ }
+        if (old == null || old === '') delete o[m[2]]; else o[m[2]] = old;
+        b.dataset.sect = JSON.stringify(o);
+      }
+    } else {
+      api.doc.hf = { ...(api.doc.hf || {}), [key.slice(3)]: old == null ? '' : old };
+    }
+    resetHf();
+    api.applyPage();
+    api.changed(true);
+  }
+  const note = el.closest('[data-compare-note]');
+  (el.closest('p') || el).remove();
+  if (note && !note.querySelector('span.fc')) note.remove();
+}
 function resolveFormat(el, accept) {
   if (!el || !el.isConnected) return;
+  if (el.dataset.hfKey) return resolveHf(el, accept);
   if (el.dataset.cellStyle !== undefined || el.dataset.tableClass !== undefined || el.dataset.tableCols !== undefined) return resolveLook(el, accept);
   if (accept) { unwrap(el); return; }
   if (el.dataset.lift) liftOut(el);

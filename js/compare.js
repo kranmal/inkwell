@@ -501,17 +501,17 @@ const sectsOf = (html) => { const d = document.createElement('div'); d.innerHTML
 export function diffPage(oldHf, newHf, oldHtml, newHtml) {
   const shown = (k, v) => (v === undefined || v === null || v === '' || v === false ? 'none' : v === true ? 'yes' : String(v));
   const D0 = { headerAlign: 'left', footerAlign: 'left', num: 'none', numFormat: '1' }, out = [], a = { ...D0, ...(oldHf || {}) }, b = { ...D0, ...(newHf || {}) };
-  for (const k of Object.keys(HF_LABELS)) if (shown(k, a[k]) !== shown(k, b[k])) out.push({ what: HF_LABELS[k], was: shown(k, a[k]), now: shown(k, b[k]) });
+  for (const k of Object.keys(HF_LABELS)) if (shown(k, a[k]) !== shown(k, b[k])) out.push({ what: HF_LABELS[k], was: shown(k, a[k]), now: shown(k, b[k]), key: 'hf:' + k, raw: a[k] === undefined ? null : a[k] });
   const sa = sectsOf(oldHtml || ''), sb = sectsOf(newHtml || '');
   for (let i = 0; i < Math.max(sa.length, sb.length); i++) {
     for (const k of ['header', 'footer']) {
       const was = shown(k, (sa[i] || {})[k]), now = shown(k, (sb[i] || {})[k]);
-      if (was !== now) out.push({ what: `Section ${i + 2} ${k}`, was, now });
+      if (was !== now) out.push({ what: `Section ${i + 2} ${k}`, was, now, key: `sect:${i}:${k}`, raw: (sa[i] || {})[k] === undefined ? null : sa[i][k] });
     }
   }
   return out;
 }
-const hfNote = (diffs) => `<blockquote data-compare-note="1"><p><b>Header and footer changes found by Compare</b> (page settings are not tracked changes; this result uses the new ones. Delete this note when you have read it.)</p>${diffs.map((d) => `<p>${esc(d.what)}: “${esc(d.was)}” → “${esc(d.now)}”</p>`).join('')}</blockquote>`;
+export const hfNote = (diffs, time = Date.now()) => `<blockquote data-compare-note="1"><p><b>Header and footer changes found by Compare.</b> This result uses the new settings: Accept keeps one, Reject puts the old one back.</p>${diffs.map((d) => `<p><span class="fc" data-author="${AUTHOR}" data-time="${time}" data-label="${esc(d.what)}" data-hf-key="${esc(d.key)}" data-hf-was="${esc(JSON.stringify(d.raw))}">${esc(d.what)}: “${esc(d.was)}” → “${esc(d.now)}”</span></p>`).join('')}</blockquote>`;
 const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 
 const when = (ts) => new Date(ts).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
