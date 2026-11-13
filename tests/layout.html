@@ -186,6 +186,18 @@ const tests = [
     if (same.changes || same.html.indexOf('class="tc"') >= 0) f.push('identical documents reported changes');
     return { fail: f, info: JSON.stringify(r.stats) };
   } },
+  { name: 'Accessibility checker finds missing alt text, skipped headings, vague links, header-less tables and low contrast', async run() {
+    const { check } = await import('../js/access.js?t=' + Date.now());
+    const box = document.createElement('div');
+    box.style.cssText = 'position:absolute;left:-9999px;background:#fff';
+    box.innerHTML = '<h2>A</h2><h4>B</h4><p>x <a href="#">click here</a> <span style="color:#bbbbbb">pale</span> <span style="color:#222222">dark</span></p><p><img src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" alt=""></p><table><tr><td>a</td></tr><tr><td>b</td></tr></table>';
+    document.body.append(box);
+    const got = check(box).map((i) => i.rule + ':' + i.sev).sort().join(' '), f = [];
+    box.remove();
+    for (const want of ['alt:error', 'heading:warn', 'link:warn', 'table:warn', 'contrast:error']) if (!got.includes(want)) f.push('missing ' + want + ' in ' + got);
+    if ((got.match(/contrast/g) || []).length !== 1) f.push('expected exactly one contrast issue: ' + got);
+    return { fail: f, info: got };
+  } },
   { name: 'Word charts survive an export and re-import as editable charts', async run() {
     const { exportDocx, loadScript } = await import('../js/docx.js?t=' + Date.now());
     const { prepare } = await import('../js/docximport.js?t=' + Date.now());
