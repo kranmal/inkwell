@@ -2,8 +2,8 @@
 .doc {
   --doc-font: "Helvetica Neue", Helvetica, Arial, sans-serif;
   --head-font: "Helvetica Neue", Helvetica, Arial, sans-serif;
-  --head-color: #0f5f59;
-  --doc-accent: #0f766e;
+  --head-color: #1e3178;
+  --doc-accent: #2c4390;
   font-family: var(--doc-font);
   font-size: 11pt;
   line-height: 1.5;
