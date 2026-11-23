@@ -69,7 +69,7 @@ function toHex(c) {
   const m = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(c.trim());
   if (m) return m[1].length === 3 ? '#' + [...m[1]].map((ch) => ch + ch).join('') : c.trim().toLowerCase();
   const r = /rgba?\((\d+)[,\s]+(\d+)[,\s]+(\d+)/.exec(c);
-  return r ? '#' + [r[1], r[2], r[3]].map((n) => Number(n).toString(16).padStart(2, '0')).join('') : '#0f766e';
+  return r ? '#' + [r[1], r[2], r[3]].map((n) => Number(n).toString(16).padStart(2, '0')).join('') : '#2c4390';
 }
 
 export function apply() {

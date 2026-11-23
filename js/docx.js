@@ -640,7 +640,7 @@ export async function exportDocx(root, { title = 'Document', page, hf = null, st
   const bodyFont = fontName(cs.getPropertyValue('--doc-font'), 'Calibri');
   const headFont = fontName(cs.getPropertyValue('--head-font'), bodyFont);
   const headColor = hex(cs.getPropertyValue('--head-color').trim()) || '1F1F1F';
-  const accent = hex(cs.getPropertyValue('--doc-accent').trim()) || '0F766E';
+  const accent = hex(cs.getPropertyValue('--doc-accent').trim()) || '2C4390';
   const baseHalf = Math.round((parseFloat(cs.fontSize) || 14.67) * 0.75 * 2);
 
   // One paragraph style from a set of defaults plus whatever the user changed in "Modify styles".
